@@ -1,16 +1,14 @@
 /**
- * Type-level conformance for Standard Schema v1.
+ * Type-level conformance for Standard Schema v1, as vitest type tests
+ * (run by `npm test` via `typecheck`, and by `tsc --noEmit`).
  *
- * This file has no runtime behavior; it is validated purely by `tsc --noEmit`.
- * It guarantees three things that runtime tests cannot:
- *
- *   1. Our vendored `StandardSchemaV1` interface stays bidirectionally
- *      assignable with the OFFICIAL published `@standard-schema/spec` — so the
- *      vendored copy cannot silently drift from the spec.
+ * Guarantees that runtime tests cannot:
+ *   1. The vendored `StandardSchemaV1` stays bidirectionally assignable with
+ *      the OFFICIAL published `@standard-schema/spec` — it can't drift.
  *   2. Every totalis schema is assignable to the official `StandardSchemaV1`.
- *   3. The spec's `InferOutput` recovers exactly the validated type — no
- *      widening, no `any` leak.
+ *   3. The spec's `InferOutput` recovers exactly the validated type, no `any`.
  */
+import { assertType, describe, expectTypeOf, test } from "vitest";
 import type { StandardSchemaV1 as OfficialStandardSchemaV1 } from "@standard-schema/spec";
 
 import {
@@ -23,74 +21,51 @@ import {
   type StandardSchemaV1 as VendoredStandardSchemaV1,
 } from "./totalis";
 
-// --- tiny type-level assertion kit -----------------------------------------
+const str = string();
+const lit = literal("on");
+const user = object({ name: string(), age: number(), nickname: string().optional() });
 
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+describe("vendored spec stays in sync with @standard-schema/spec", () => {
+  test("Props is bidirectionally assignable with the official Props", () => {
+    expectTypeOf<VendoredStandardSchemaV1.Props<{ a: string }>>().toEqualTypeOf<
+      OfficialStandardSchemaV1.Props<{ a: string }>
+    >();
+  });
 
-type Expect<T extends true> = T;
-
-// --- 1. vendored spec <-> official spec are bidirectionally assignable ------
-
-declare const vendoredProps: VendoredStandardSchemaV1.Props<{ a: string }, { a: string }>;
-declare const officialProps: OfficialStandardSchemaV1.Props<{ a: string }, { a: string }>;
-
-// Assigning each to the other proves structural equivalence in both directions.
-const _propsVendoredToOfficial: OfficialStandardSchemaV1.Props<{ a: string }, { a: string }> =
-  vendoredProps;
-const _propsOfficialToVendored: VendoredStandardSchemaV1.Props<{ a: string }, { a: string }> =
-  officialProps;
-
-declare const vendoredSchema: VendoredStandardSchemaV1<{ a: string }, { a: string }>;
-const _schemaVendoredToOfficial: OfficialStandardSchemaV1<{ a: string }, { a: string }> =
-  vendoredSchema;
-
-// --- 2. concrete totalis schemas satisfy the official interface -------------
-
-const _str: OfficialStandardSchemaV1<string, string> = string();
-const _num: OfficialStandardSchemaV1<number, number> = number();
-const _bool: OfficialStandardSchemaV1<boolean, boolean> = boolean();
-const _lit: OfficialStandardSchemaV1<"on", "on"> = literal("on");
-const _arr: OfficialStandardSchemaV1<string[], string[]> = array(string());
-
-const userSchema = object({
-  name: string(),
-  age: number(),
-  nickname: string().optional(),
+  test("the interface is bidirectionally assignable with the official one", () => {
+    expectTypeOf<VendoredStandardSchemaV1<{ a: string }>>().toEqualTypeOf<
+      OfficialStandardSchemaV1<{ a: string }>
+    >();
+  });
 });
-userSchema satisfies OfficialStandardSchemaV1;
 
-// --- 3. InferOutput recovers the exact validated type -----------------------
+describe("totalis schemas satisfy the official Standard Schema interface", () => {
+  test("primitives", () => {
+    assertType<OfficialStandardSchemaV1<string, string>>(string());
+    assertType<OfficialStandardSchemaV1<number, number>>(number());
+    assertType<OfficialStandardSchemaV1<boolean, boolean>>(boolean());
+    assertType<OfficialStandardSchemaV1<"on", "on">>(literal("on"));
+    assertType<OfficialStandardSchemaV1<string[], string[]>>(array(string()));
+  });
 
-type _InferString = Expect<Equals<OfficialStandardSchemaV1.InferOutput<typeof _str>, string>>;
-type _InferLiteral = Expect<Equals<OfficialStandardSchemaV1.InferOutput<typeof _lit>, "on">>;
-type _InferUser = Expect<
-  Equals<
-    OfficialStandardSchemaV1.InferOutput<typeof userSchema>,
-    { name: string; age: number; nickname?: string | undefined }
-  >
->;
+  test("objects (including optional keys)", () => {
+    const user = object({ name: string(), age: number(), nickname: string().optional() });
+    assertType<OfficialStandardSchemaV1>(user);
+  });
+});
 
-// The vendored InferOutput must agree with the official one.
-type _InferUserVendored = Expect<
-  Equals<
-    VendoredStandardSchemaV1.InferOutput<typeof userSchema>,
-    OfficialStandardSchemaV1.InferOutput<typeof userSchema>
-  >
->;
+describe("InferOutput recovers the exact validated type", () => {
+  test("primitives and literals", () => {
+    expectTypeOf<OfficialStandardSchemaV1.InferOutput<typeof str>>().toEqualTypeOf<string>();
+    expectTypeOf<OfficialStandardSchemaV1.InferOutput<typeof lit>>().toEqualTypeOf<"on">();
+  });
 
-// Guard against `any` leaking into the inferred output.
-type IsAny<T> = 0 extends 1 & T ? true : false;
-type _NoAnyLeak = Expect<Equals<IsAny<OfficialStandardSchemaV1.InferOutput<typeof userSchema>>, false>>;
-
-// Reference the assignment bindings so `noUnusedLocals`-style lints stay happy.
-export const _conformanceWitnesses = [
-  _propsVendoredToOfficial,
-  _propsOfficialToVendored,
-  _schemaVendoredToOfficial,
-  _str,
-  _num,
-  _bool,
-  _lit,
-  _arr,
-];
+  test("objects, agreeing with the vendored InferOutput, with no `any` leak", () => {
+    type Expected = { name: string; age: number; nickname?: string | undefined };
+    expectTypeOf<OfficialStandardSchemaV1.InferOutput<typeof user>>().toEqualTypeOf<Expected>();
+    expectTypeOf<
+      VendoredStandardSchemaV1.InferOutput<typeof user>
+    >().toEqualTypeOf<OfficialStandardSchemaV1.InferOutput<typeof user>>();
+    expectTypeOf<OfficialStandardSchemaV1.InferOutput<typeof user>>().not.toBeAny();
+  });
+});

@@ -244,8 +244,9 @@ transforms — without pulling in a runtime.
 
 ```bash
 npm install
-npm run typecheck   # tsc --noEmit — the real test for the type-level guarantees
-npm test            # runtime conformance tests (vitest)
+npm run typecheck   # tsc --noEmit — authoritative full-project gate
+npm test            # runtime + type-level tests (Vitest, typecheck enabled)
+npm run test:types  # only the *.test-d.ts type tests
 ```
 
 Every feature ships with **both** a runtime test and a type-level test.
@@ -489,8 +490,9 @@ codec は、Effect Schema の双方向変換に対する「ランタイムを引
 
 ```bash
 npm install
-npm run typecheck   # tsc --noEmit —型レベル保証にとっての本当のテスト
-npm test            # ランタイム適合テスト (vitest)
+npm run typecheck   # tsc --noEmit — プロジェクト全体の最終ゲート
+npm test            # ランタイム + 型レベルテスト (Vitest, typecheck 有効)
+npm run test:types  # *.test-d.ts の型テストのみ
 ```
 
 すべての機能は、ランタイムテストと型レベルテストの**両方**を伴って提供されます。

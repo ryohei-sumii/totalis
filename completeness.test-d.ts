@@ -1,13 +1,14 @@
 /**
- * Type-level guarantees for the completeness API (roadmap 3). Validated by
- * `tsc --noEmit`.
+ * Type-level guarantees for the completeness API (roadmap 3), as vitest type
+ * tests.
  *
- * The improvement over the old `& "Schema does not match T"` marker is that
- * every failure is a NATIVE, per-field error: a missing key, an extra key, a
+ * Every failure is a NATIVE, per-field error: a missing key, an extra key, a
  * wrong/too-loose field, or an unbranded field where the domain type is
- * branded. Here we assert each of those fails to compile, that valid shapes
- * compile, and that the produced schema's `Infer` is exactly `T`.
+ * branded. Here we assert each fails to compile, that valid shapes compile,
+ * and that the produced schema's `Infer` is exactly `T`.
  */
+import { describe, expectTypeOf, test } from "vitest";
+
 import {
   codec,
   number,
@@ -18,84 +19,90 @@ import {
   type SchemaFor,
 } from "./totalis";
 
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-type Expect<T extends true> = T;
-
 interface User {
   name: string;
   age: number;
   nickname?: string;
 }
 
-// --- a complete schema compiles and `Infer` is exactly `T` ------------------
-
-const user = schemaFor<User>()({
-  name: string(),
-  age: number(),
-  nickname: string().optional(),
-});
-type _UserInfer = Expect<Equals<Infer<typeof user>, User>>;
-
-// --- missing field: native "Property '...' is missing" ----------------------
-
-// @ts-expect-error — missing `age` (and `nickname`).
-schemaFor<User>()({
-  name: string(),
-});
-
-// --- wrong/too-loose field: error points at the key ------------------------
-
-schemaFor<User>()({
-  name: string(),
-  // @ts-expect-error — `age` must decode to `number`, not `string`.
-  age: string(),
-  nickname: string().optional(),
-});
-
-// --- extra field: excess property check fires -------------------------------
-
-schemaFor<User>()({
-  name: string(),
-  age: number(),
-  nickname: string().optional(),
-  // @ts-expect-error — `role` is not a key of `User`.
-  role: string(),
-});
-
-// --- brand guidance: unbranded field where `T` is branded -------------------
-
 type Email = Branded<string, "Email">;
 interface Contact {
   email: Email;
 }
 
-schemaFor<Contact>()({
-  email: string().brand<"Email">(), // ✅ branded
+describe("schemaFor builds a schema whose Infer is exactly T", () => {
+  test("complete shape compiles and infers T", () => {
+    const user = schemaFor<User>()({
+      name: string(),
+      age: number(),
+      nickname: string().optional(),
+    });
+    expectTypeOf<Infer<typeof user>>().toEqualTypeOf<User>();
+  });
 });
 
-schemaFor<Contact>()({
-  // @ts-expect-error — plain string is not Schema<Branded<string, "Email">>.
-  email: string(),
+describe("incompleteness is a native per-field error", () => {
+  test("missing field", () => {
+    // @ts-expect-error — missing `age` (and `nickname`).
+    schemaFor<User>()({ name: string() });
+  });
+
+  test("wrong / too-loose field", () => {
+    schemaFor<User>()({
+      name: string(),
+      // @ts-expect-error — `age` must decode to `number`, not `string`.
+      age: string(),
+      nickname: string().optional(),
+    });
+  });
+
+  test("extra field", () => {
+    schemaFor<User>()({
+      name: string(),
+      age: number(),
+      nickname: string().optional(),
+      // @ts-expect-error — `role` is not a key of `User`.
+      role: string(),
+    });
+  });
 });
 
-// --- codec fields are allowed (input may differ from T[K]) ------------------
+describe("brand guidance", () => {
+  test("branded field compiles", () => {
+    const contact = schemaFor<Contact>()({ email: string().brand<"Email">() });
+    expectTypeOf<Infer<typeof contact>>().toEqualTypeOf<Contact>();
+  });
 
-interface Log {
-  at: Date;
-}
-schemaFor<Log>()({
-  at: codec(string(), { decode: (s) => new Date(s), encode: (d) => d.toISOString() }),
+  test("a plain string() where T is branded fails to compile", () => {
+    schemaFor<Contact>()({
+      // @ts-expect-error — plain string is not Schema<Branded<string, "Email">>.
+      email: string(),
+    });
+  });
 });
 
-// --- SchemaFor used satisfies-style preserves precise field types -----------
+describe("codec fields are allowed (input may differ from T[K])", () => {
+  test("a Date field backed by an ISO-string codec", () => {
+    interface Log {
+      at: Date;
+    }
+    const log = schemaFor<Log>()({
+      at: codec(string(), { decode: (s) => new Date(s), encode: (d) => d.toISOString() }),
+    });
+    expectTypeOf<Infer<typeof log>>().toEqualTypeOf<Log>();
+  });
+});
 
-const preserved = {
-  email: string().brand<"Email">(),
-} satisfies SchemaFor<Contact>;
-type _Preserved = Expect<Equals<Infer<typeof preserved.email>, Email>>;
+describe("SchemaFor used satisfies-style preserves precise field types", () => {
+  test("a branded field keeps its branded Infer", () => {
+    const preserved = {
+      email: string().brand<"Email">(),
+    } satisfies SchemaFor<Contact>;
+    expectTypeOf<Infer<typeof preserved.email>>().toEqualTypeOf<Email>();
+  });
 
-// @ts-expect-error — satisfies also catches a missing field.
-const _missing = {} satisfies SchemaFor<Contact>;
-
-export const _completenessWitnesses = [user, preserved, _missing];
+  test("satisfies still catches a missing field", () => {
+    // @ts-expect-error — missing `email`.
+    const _missing = {} satisfies SchemaFor<Contact>;
+  });
+});

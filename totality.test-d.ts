@@ -1,10 +1,12 @@
 /**
- * Type-level guarantees for the totality thesis. Validated by `tsc --noEmit`.
+ * Type-level guarantees for the totality thesis, as vitest type tests.
  *
  * These assertions ARE the product: brands make unvalidated values
  * unrepresentable, `schemaFor` refuses to drift from a branded domain type,
  * and `match` forces every union variant to be handled.
  */
+import { describe, expectTypeOf, test } from "vitest";
+
 import {
   array,
   discriminatedUnion,
@@ -21,81 +23,83 @@ import {
   type NonEmptyArray,
 } from "./totalis";
 
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-type Expect<T extends true> = T;
-
-// --- brands: the output type carries the brand ------------------------------
-
 type Email = Branded<string, "Email">;
-const emailSchema = string().brand<"Email">();
-type _Email = Expect<Equals<Infer<typeof emailSchema>, Email>>;
-
-declare function sendTo(email: Email): void;
-const validated = emailSchema.parse("a@b.com");
-sendTo(validated); // ✅ a validated value is branded
-
-// @ts-expect-error — a raw string is NOT an Email: you cannot skip validation.
-sendTo("a@b.com");
-
-// --- int / nonempty: precise output types -----------------------------------
-
-type _Int = Expect<Equals<Infer<ReturnType<typeof int>>, Integer>>;
 const nonEmpty = array(number()).nonempty();
-type _NonEmpty = Expect<Equals<Infer<typeof nonEmpty>, NonEmptyArray<number>>>;
 
-// --- completeness now enforces brands ---------------------------------------
-
-interface Account {
-  id: Branded<string, "AccountId">;
-  email: Email;
-}
-
-// ✅ the schema must produce the branded fields to satisfy `Account`.
-schemaFor<Account>()({
-  id: string().brand<"AccountId">(),
-  email: string().brand<"Email">(),
-});
-
-// The error now points at the exact field (improved DX): a plain `string()`
-// drifts from the branded domain type `AccountId`.
-schemaFor<Account>()({
-  // @ts-expect-error — not assignable to Schema<Branded<string, "AccountId">>.
-  id: string(),
-  email: string().brand<"Email">(),
-});
-
-// --- discriminatedUnion infers the exact union ------------------------------
-
-const shape = discriminatedUnion("kind", [
-  object({ kind: literal("a"), value: number() }),
-  object({ kind: literal("b"), label: string() }),
-]);
-type _Union = Expect<
-  Equals<
-    Infer<typeof shape>,
-    { kind: "a"; value: number } | { kind: "b"; label: string }
-  >
->;
-
-// --- match: exhaustiveness is compile-enforced ------------------------------
-
-type Event =
-  | { type: "click"; x: number }
-  | { type: "key"; code: string };
-
-const describe = (event: Event): string =>
-  match(event, "type", {
-    click: (c) => `click ${c.x}`,
-    key: (k) => `key ${k.code}`,
+describe("brands carry the invariant into the output type", () => {
+  test("a branded schema infers the branded type", () => {
+    const emailSchema = string().brand<"Email">();
+    expectTypeOf<Infer<typeof emailSchema>>().toEqualTypeOf<Email>();
   });
 
-// Missing the "key" handler: adding/keeping a variant forces every match call
-// site to handle it.
-const incomplete = (event: Event): string =>
-  // @ts-expect-error — exhaustiveness is enforced: the "key" handler is required.
-  match(event, "type", {
-    click: (c) => `click ${c.x}`,
+  test("a validated value is an Email; a raw string is not", () => {
+    const emailSchema = string().brand<"Email">();
+    const sendTo = (_email: Email): void => {};
+    sendTo(emailSchema.parse("a@b.com")); // ✅
+    // @ts-expect-error — a raw string is not an Email: you cannot skip validation.
+    sendTo("a@b.com");
+  });
+});
+
+describe("refinements produce precise output types", () => {
+  test("int and nonempty", () => {
+    expectTypeOf<Infer<ReturnType<typeof int>>>().toEqualTypeOf<Integer>();
+    expectTypeOf<Infer<typeof nonEmpty>>().toEqualTypeOf<NonEmptyArray<number>>();
+  });
+});
+
+describe("completeness is strengthened by brands", () => {
+  interface Account {
+    id: Branded<string, "AccountId">;
+    email: Email;
+  }
+
+  test("a schema must produce the branded fields", () => {
+    const account = schemaFor<Account>()({
+      id: string().brand<"AccountId">(),
+      email: string().brand<"Email">(),
+    });
+    expectTypeOf<Infer<typeof account>>().toEqualTypeOf<Account>();
   });
 
-export const _totalityWitnesses = [validated, describe, incomplete];
+  test("a plain string() drifts from the branded domain type", () => {
+    schemaFor<Account>()({
+      // @ts-expect-error — not assignable to Schema<Branded<string, "AccountId">>.
+      id: string(),
+      email: string().brand<"Email">(),
+    });
+  });
+});
+
+describe("discriminatedUnion infers the exact union", () => {
+  test("union of variants", () => {
+    const shape = discriminatedUnion("kind", [
+      object({ kind: literal("a"), value: number() }),
+      object({ kind: literal("b"), label: string() }),
+    ]);
+    expectTypeOf<Infer<typeof shape>>().toEqualTypeOf<
+      { kind: "a"; value: number } | { kind: "b"; label: string }
+    >();
+  });
+});
+
+describe("match enforces exhaustiveness at compile time", () => {
+  type Event = { type: "click"; x: number } | { type: "key"; code: string };
+
+  test("all handlers present compiles", () => {
+    const describeEvent = (event: Event): string =>
+      match(event, "type", {
+        click: (c) => `click ${c.x}`,
+        key: (k) => `key ${k.code}`,
+      });
+    expectTypeOf(describeEvent).returns.toEqualTypeOf<string>();
+  });
+
+  test("a missing handler fails to compile", () => {
+    const _incomplete = (event: Event): string =>
+      // @ts-expect-error — the "key" handler is required.
+      match(event, "type", {
+        click: (c) => `click ${c.x}`,
+      });
+  });
+});

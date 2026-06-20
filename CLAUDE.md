@@ -135,9 +135,11 @@ spec at https://standardschema.dev before implementing.
    fields). Brand ergonomics resolved: a plain `string()` where `T` wants
    `Branded<string, "Email">` errors with the branded type named, guiding you
    to `.brand<"Email">()`. (`completeness.test.ts` + `completeness.test-d.ts`.)
-5. Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type tests).
-   Type-level correctness is the product, so it must be tested as rigorously as
-   runtime behavior. (Seeded: `*.test-d.ts` validated by `tsc --noEmit`.)
+5. ~~Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type
+   tests).~~ ✅ Done. `*.test-d.ts` are vitest type tests (`expectTypeOf` /
+   `assertType` + `@ts-expect-error` negatives) run via `typecheck` (Vitest
+   config `typecheck.enabled`), so `npm test` runs runtime AND type tests
+   together; `tsc --noEmit` remains the authoritative full-project gate.
 6. Structured/tree errors + i18n-ready messages (errors aimed at end users, an
    underserved niche).
 
@@ -152,9 +154,9 @@ spec at https://standardschema.dev before implementing.
 
 ```bash
 npm install            # deps
-npx tsc --noEmit       # typecheck (the real test for this project)
-# add when set up:
-# npm test             # runtime + type-level tests
+npx tsc --noEmit       # typecheck the whole project (authoritative gate)
+npm test               # runtime + type-level tests (Vitest, typecheck enabled)
+npm run test:types     # only the *.test-d.ts type tests
 ```
 
 ## House rules for Claude Code

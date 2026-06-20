@@ -12,6 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:types": "vitest run --typecheck.only",
     "test:watch": "vitest"
   },
   "keywords": [
