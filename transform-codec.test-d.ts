@@ -38,6 +38,20 @@ describe("default: Input gains undefined, Output does not", () => {
   });
 });
 
+describe("refine / default are decode-only, even on a codec", () => {
+  test("refine() on a codec drops encodability", () => {
+    const refined = isoDate.refine(() => true);
+    // @ts-expect-error — refine returns a plain Schema; no `encode`.
+    refined.encode(new Date());
+  });
+
+  test("default() on a codec drops encodability", () => {
+    const withDefaultDate = isoDate.default(() => new Date());
+    // @ts-expect-error — default returns a plain Schema; no `encode`.
+    withDefaultDate.encode(new Date());
+  });
+});
+
 describe("codec: bidirectional and typed in both directions", () => {
   test("Infer / InferInput", () => {
     expectTypeOf<Infer<typeof isoDate>>().toEqualTypeOf<Date>();

@@ -349,6 +349,10 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
    * Narrow the accepted values with a runtime predicate. Returns a schema with
    * the same output type; combine with {@link Schema.brand} to record the
    * invariant in the type as well.
+   *
+   * Decode-only: even on a {@link Codec}, `refine` returns a plain `Schema`
+   * (no `encode`), so a refined codec field is rejected by `objectCodec`. Use
+   * `.brand()` / `.optional()` to keep encodability.
    */
   refine(check: (value: Output) => boolean, message = "Failed refinement"): Schema<Output, Input> {
     return new RefineSchema<Output, Input>(this, check, message);
@@ -371,6 +375,8 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
    * Pass a thunk (`() => Output`) for full control / non-cloneable values. A
    * plain value is deep-cloned per parse (via `structuredClone`) so a mutable
    * default like `.default([])` is NOT shared across results.
+   *
+   * Decode-only: returns a plain `Schema` (no `encode`) even on a {@link Codec}.
    */
   default(defaultValue: Output | (() => Output)): Schema<Output, Input | undefined> {
     const makeDefault: () => Output =
@@ -486,13 +492,35 @@ class LiteralSchema<L extends Literal> extends Codec<L> {
   }
 }
 
+// Shared wrapper decode logic, so the Schema and Codec variants below cannot
+// drift: each `_parse` is a one-line delegation to the same function.
+
+function parseOptional<T>(
+  inner: Schema<T, unknown>,
+  input: unknown,
+  path: ReadonlyArray<PropertyKey>,
+): Internal<T | undefined> {
+  return input === undefined ? ok(undefined) : inner._parse(input, path);
+}
+
+function parseBranded<T, B extends string>(
+  inner: Schema<T, unknown>,
+  input: unknown,
+  path: ReadonlyArray<PropertyKey>,
+): Internal<Branded<T, B>> {
+  const result = inner._parse(input, path);
+  // The brand is type-level only, so a successful inner value already IS the
+  // branded value at runtime.
+  return result.ok ? ok(result.value as Branded<T, B>) : result;
+}
+
 class OptionalSchema<T, Input = T> extends Schema<T | undefined, Input | undefined> {
   constructor(readonly inner: Schema<T, Input>) {
     super();
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | undefined> {
-    return input === undefined ? ok(undefined) : this.inner._parse(input, path);
+    return parseOptional(this.inner, input, path);
   }
 }
 
@@ -502,15 +530,13 @@ class BrandSchema<T, B extends string, Input> extends Schema<Branded<T, B>, Inpu
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Branded<T, B>> {
-    const result = this.inner._parse(input, path);
-    // The brand is type-level only, so a successful inner value already IS the
-    // branded value at runtime.
-    return result.ok ? ok(result.value as Branded<T, B>) : result;
+    return parseBranded(this.inner, input, path);
   }
 }
 
 // Encodable counterparts of the wrappers: built only from a Codec inner, so
 // they can delegate `encode` and stay encodable (see Codec.brand / .optional).
+// Decode reuses the same helpers as the Schema variants above.
 
 class BrandCodec<T, B extends string, Input> extends Codec<Branded<T, B>, Input> {
   constructor(readonly inner: Codec<T, Input>) {
@@ -518,8 +544,7 @@ class BrandCodec<T, B extends string, Input> extends Codec<Branded<T, B>, Input>
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Branded<T, B>> {
-    const result = this.inner._parse(input, path);
-    return result.ok ? ok(result.value as Branded<T, B>) : result;
+    return parseBranded(this.inner, input, path);
   }
 
   encode(value: Branded<T, B>): Input {
@@ -533,7 +558,7 @@ class OptionalCodec<T, Input> extends Codec<T | undefined, Input | undefined> {
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | undefined> {
-    return input === undefined ? ok(undefined) : this.inner._parse(input, path);
+    return parseOptional(this.inner, input, path);
   }
 
   encode(value: T | undefined): Input | undefined {
@@ -913,6 +938,13 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
 ): R {
   const tag = value[key];
   const handler = handlers[tag];
+  // The type system guarantees a handler for every static tag; this guards the
+  // case where `value` reached us via a cast / unvalidated JSON with an
+  // out-of-range tag, turning an opaque "handler is not a function" TypeError
+  // into a clear, assertNever-style error.
+  if (typeof handler !== "function") {
+    throw new Error(`match: no handler for ${String(key)}=${JSON.stringify(tag)}`);
+  }
   return handler(value as Extract<T, Record<K, T[K]>>);
 }
 
