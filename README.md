@@ -240,6 +240,36 @@ isoDate.encode(d);                                    // string — round-trips
 Codecs are the lightweight, standalone answer to Effect Schema's bidirectional
 transforms — without pulling in a runtime.
 
+#### Structured, i18n-ready errors
+
+Every issue is machine-readable (`code` + `params`); the English `message` is
+only a fallback, so localization is just a function you pass in. `safeParse`
+gives you the discriminated result, and `ValidationError` can render a tree or
+a flat form map.
+
+```ts
+import { object, string, number, type Localizer } from "totalis";
+
+const user = object({ name: string(), age: number() });
+const result = user.safeParse({ name: 1, age: "x" });
+
+if (!result.success) {
+  result.error.issues;
+  // [{ code: "invalid_type", path: ["name"], params: { expected: "string", ... }, message: "..." }, ...]
+
+  result.error.flatten();
+  // { formErrors: [], fieldErrors: { name: ["Expected string, received number"], age: [...] } }
+
+  result.error.format();
+  // { errors: [], properties: { name: { errors: ["..."] }, age: { errors: ["..."] } } }
+
+  // i18n: re-render from `code` + `params`, no locale files shipped by totalis.
+  const ja: Localizer = (issue) =>
+    issue.code === "invalid_type" ? `${String(issue.params.expected)} が必要です` : issue.message;
+  result.error.flatten(ja);
+}
+```
+
 ### Development
 
 ```bash
@@ -485,6 +515,36 @@ isoDate.encode(d);                                    // string — ラウンド
 
 codec は、Effect Schema の双方向変換に対する「ランタイムを引き込まない、単体で
 軽量な」答えです。
+
+#### 構造化された i18n 対応エラー
+
+すべての issue は機械可読（`code` ＋ `params`）で、英語の `message` はフォール
+バックにすぎません。だからローカライズは関数を渡すだけです。`safeParse` で判別
+可能な結果が得られ、`ValidationError` はツリーやフラットなフォーム用マップを
+生成できます。
+
+```ts
+import { object, string, number, type Localizer } from "totalis";
+
+const user = object({ name: string(), age: number() });
+const result = user.safeParse({ name: 1, age: "x" });
+
+if (!result.success) {
+  result.error.issues;
+  // [{ code: "invalid_type", path: ["name"], params: { expected: "string", ... }, message: "..." }, ...]
+
+  result.error.flatten();
+  // { formErrors: [], fieldErrors: { name: ["Expected string, received number"], age: [...] } }
+
+  result.error.format();
+  // { errors: [], properties: { name: { errors: ["..."] }, age: { errors: ["..."] } } }
+
+  // i18n: `code` + `params` から再描画。totalis 自身はロケールファイルを持たない。
+  const ja: Localizer = (issue) =>
+    issue.code === "invalid_type" ? `${String(issue.params.expected)} が必要です` : issue.message;
+  result.error.flatten(ja);
+}
+```
 
 ### 開発
 

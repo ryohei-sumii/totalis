@@ -102,6 +102,10 @@ spec at https://standardschema.dev before implementing.
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
   returns a discriminated `{ success: true; data } | { success: false; error }`.
+- Errors are structured + i18n-ready: `Issue` = `{ code, path, message, params }`
+  (machine-readable `IssueCode` + `params`, English `message` as fallback);
+  `ValidationError.format()` / `.flatten()` render a tree / `{ formErrors,
+  fieldErrors }`, and both take an optional `Localizer`.
 - `schemaFor<T>()` / `SchemaFor<T>` are the completeness primitives (native
   per-field errors; `SchemaFor<T>` also works `satisfies`-style) — extend their
   spirit everywhere.
@@ -140,8 +144,12 @@ spec at https://standardschema.dev before implementing.
    `assertType` + `@ts-expect-error` negatives) run via `typecheck` (Vitest
    config `typecheck.enabled`), so `npm test` runs runtime AND type tests
    together; `tsc --noEmit` remains the authoritative full-project gate.
-6. Structured/tree errors + i18n-ready messages (errors aimed at end users, an
-   underserved niche).
+6. ~~Structured/tree errors + i18n-ready messages (errors aimed at end users,
+   an underserved niche).~~ ✅ Done. Each `Issue` carries a machine-readable
+   `code` + `params` (English `message` is just the fallback, so localization
+   is a `Localizer = (issue) => string` you pass in). `ValidationError` exposes
+   `.format()` (a tree mirroring the input) and `.flatten()`
+   (`{ formErrors, fieldErrors }`). (`errors.test.ts` + `errors.test-d.ts`.)
 
 ## Conventions
 
