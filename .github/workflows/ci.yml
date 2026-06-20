@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm is the only supported package manager (enforced by `preinstall`).
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Authoritative full-project type gate.
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # Runtime + type-level tests (Vitest, typecheck enabled).
+      - name: Test
+        run: pnpm test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Fail the build on known high/critical advisories in the dependency tree.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high

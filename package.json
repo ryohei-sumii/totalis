@@ -1,0 +1,37 @@
+{
+  "name": "totalis",
+  "version": "0.0.0",
+  "description": "A TypeScript-first runtime validation library where your schema can never drift from your type.",
+  "license": "MIT",
+  "type": "module",
+  "main": "totalis.ts",
+  "types": "totalis.ts",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
+  "files": [
+    "totalis.ts"
+  ],
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:types": "vitest run --typecheck.only",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "validation",
+    "schema",
+    "typescript",
+    "standard-schema",
+    "completeness",
+    "exhaustiveness"
+  ],
+  "devDependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
