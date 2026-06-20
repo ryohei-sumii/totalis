@@ -17,20 +17,32 @@ validator and the static type are derived from one object
 (`Infer<typeof schema>`).
 
 totalis does **not** try to beat Zod on the general case, Valibot on bundle
-size, or ArkType on raw speed. Those axes are taken. Our axis is
-**completeness / exhaustiveness (完全性・網羅性)**.
+size, or ArkType on raw speed. Those axes are taken. Our axis is **totality
+(全域性)** — a *total* function is defined for every input in its domain, with
+no "this can't happen" branches.
 
-Every other library is fundamentally one-directional: *schema → type*. They let
-your runtime schema and your domain types silently drift apart. totalis makes
-the **reverse guarantee** first-class:
+> **You write the runtime check exactly once, at the boundary; in exchange the
+> type system guarantees you never need a defensive check again, and the bugs
+> that would have been `if (x == null) throw` become compile errors.**
 
-1. **type → schema completeness** — if a TS type gains a field, the schema that
-   claims to validate it must *fail to compile* until it is updated
-   (`schemaFor<T>()`).
-2. **exhaustive unions** — discriminated unions get compile-time exhaustiveness;
-   adding a variant forces every consumer to handle it. *(on the roadmap)*
-3. **no silent widening / no `any` leaks** — the type-level code never degrades
-   to `any`, and that is verified with type-level tests, not just runtime tests.
+This is "parse, don't validate." A validator is the one place a runtime check
+is irreducible (network, user input, JSON). totalis doesn't pretend to remove
+runtime checks — it *concentrates* them at the boundary, and in return makes
+downstream defensive code (`?.`, `as`, re-validation, `default: throw`)
+unnecessary. We deliver it as **two promises**:
+
+1. **Completeness** — the boundary's output type never lies, because the schema
+   cannot drift from the type it claims to validate. If a TS type gains a
+   field, the schema must *fail to compile* until updated (`schemaFor<T>()`).
+2. **Totality** — the output type is the *narrowest type that is true*, and
+   unions are exhaustive, so downstream code physically cannot represent a bug:
+   - **make illegal states unrepresentable** — brands and refinements
+     (`string().brand<"Email">()`, `int()`, `array(...).nonempty()`) encode the
+     invariant the validator checked into the type itself.
+   - **exhaustive unions** — `discriminatedUnion` + `match` force every consumer
+     to handle every variant; adding one breaks every call site until handled.
+   - **no silent widening / no `any` leaks** — verified with type-level tests,
+     not just runtime tests.
 
 ### Standard Schema v1.0
 
@@ -136,6 +148,50 @@ const account = schemaFor<Account>()({
 // until you add the field — your schema can no longer drift from the type.
 ```
 
+#### Totality: make illegal states unrepresentable
+
+Brands and refinements push the invariant the validator checked into the type,
+so the "did I validate this?" guard disappears at compile time.
+
+```ts
+import { string, int, array } from "totalis";
+
+const Email = string().brand<"Email">();
+type Email = Infer<typeof Email>; // string & Brand<"Email">
+
+declare function sendTo(email: Email): void;
+
+sendTo(Email.parse(input)); // ✅ a validated value is branded
+sendTo("a@b.com");          // ✗ compile error: a raw string is not an Email
+
+int();                  // number & Brand<"int">  (rejects 1.5 at runtime)
+array(string()).nonempty(); // [string, ...string[]]
+```
+
+This also strengthens completeness: `schemaFor<{ email: Email }>()` cannot be
+satisfied by a plain `string()` — only `string().brand<"Email">()` will compile.
+
+#### Exhaustive unions: forgetting a case is a compile error
+
+```ts
+import { discriminatedUnion, object, literal, number, string, match } from "totalis";
+
+const shape = discriminatedUnion("kind", [
+  object({ kind: literal("circle"), radius: number() }),
+  object({ kind: literal("square"), side: number() }),
+]);
+type Shape = Infer<typeof shape>;
+
+const area = (s: Shape): number =>
+  match(s, "kind", {
+    circle: (c) => Math.PI * c.radius ** 2,
+    square: (q) => q.side ** 2,
+  });
+// Add a "triangle" variant and every `match` call stops compiling until handled.
+// In a hand-written `switch`, use `assertNever(x)` in the default branch for
+// the same guarantee.
+```
+
 ### Development
 
 ```bash
@@ -158,18 +214,31 @@ Zod と同じく、**スキーマを唯一の正（source of truth）**としま
 
 totalis は一般的なユースケースで Zod に、バンドルサイズで Valibot に、生の速度で
 ArkType に勝とうとはしません。それらの軸はすでに埋まっています。私たちの軸は
-**完全性・網羅性（completeness / exhaustiveness）**です。
+**全域性（totality）**です。全域関数とは、定義域のすべての入力に対して定義され、
+「これは起きないはず」という分岐を持たない関数のことです。
 
-既存ライブラリは本質的に一方向、つまり *スキーマ → 型* です。そのため、ランタイムの
-スキーマとドメインの型が知らないうちに食い違っていきます。totalis は、その**逆方向の
-保証**を主役に据えます。
+> **検査はただ一箇所、境界（boundary）でだけ書く。その代わり、境界の外では防御
+> コードが二度と要らないことを型が保証し、本来 `if (x == null) throw` だった
+> バグはコンパイルエラーになる。**
 
-1. **型 → スキーマの完全性** — TS の型にフィールドが増えたら、それを検証すると
-   謳うスキーマは更新するまで*コンパイルエラーになる*（`schemaFor<T>()`）。
-2. **網羅的なユニオン** — 判別可能なユニオンにコンパイル時の網羅性検査を与え、
-   バリアントを追加すると全ての利用箇所で対応が強制される。*（ロードマップ）*
-3. **暗黙の拡大（widening）なし／`any` の漏れなし** — 型レベルのコードが `any` に
-   退化しないことを、ランタイムテストだけでなく型レベルテストでも検証します。
+これは "parse, don't validate"（検証ではなくパースする）です。バリデータは、
+ランタイム検査が原理的に避けられない唯一の場所（ネットワーク・ユーザー入力・JSON）
+です。totalis はランタイム検査をなくすふりはしません。検査を境界に**集約**し、その
+見返りに、境界の外の防御コード（`?.`・`as`・再検査・`default: throw`）を不要に
+します。これを**2つの約束**として提供します。
+
+1. **完全性 (Completeness)** — 境界の出力型は決して嘘をつかない。スキーマが、検証
+   すると謳う型からドリフトできないからです。TS の型にフィールドが増えたら、更新
+   するまでスキーマは*コンパイルエラーになる*（`schemaFor<T>()`）。
+2. **全域性 (Totality)** — 出力型は「真である最も狭い型」であり、ユニオンは網羅的。
+   だから下流のコードは物理的にバグを表現できません:
+   - **不正な状態を表現不能にする** — ブランドと精製型
+     （`string().brand<"Email">()`・`int()`・`array(...).nonempty()`）が、
+     バリデータの検査した不変条件を型そのものに焼き込む。
+   - **網羅的なユニオン** — `discriminatedUnion` ＋ `match` が、全消費者に全バリアント
+     の対応を強制する。1つ追加すれば、対応するまで全呼び出し箇所が壊れる。
+   - **暗黙の拡大なし／`any` の漏れなし** — ランタイムテストだけでなく型レベル
+     テストでも検証。
 
 ### Standard Schema v1.0 対応
 
@@ -274,6 +343,50 @@ const account = schemaFor<Account>()({
 
 // 後で `Account` に `currency: string` が増えると、フィールドを追加するまで
 // これはコンパイルが通らなくなる — スキーマが型から乖離できなくなる。
+```
+
+#### 全域性: 不正な状態を表現不能にする
+
+ブランドと精製型は、バリデータが検査した不変条件を型に押し込みます。これにより
+「これ検証したっけ?」という防御チェックがコンパイル時に消えます。
+
+```ts
+import { string, int, array } from "totalis";
+
+const Email = string().brand<"Email">();
+type Email = Infer<typeof Email>; // string & Brand<"Email">
+
+declare function sendTo(email: Email): void;
+
+sendTo(Email.parse(input)); // ✅ 検証済みの値はブランド付き
+sendTo("a@b.com");          // ✗ コンパイルエラー: 生の string は Email ではない
+
+int();                      // number & Brand<"int">  (実行時に 1.5 を弾く)
+array(string()).nonempty(); // [string, ...string[]]
+```
+
+これは完全性も強化します。`schemaFor<{ email: Email }>()` は素の `string()` では
+満たせず、`string().brand<"Email">()` でなければコンパイルが通りません。
+
+#### 網羅的ユニオン: ケースの取りこぼしはコンパイルエラー
+
+```ts
+import { discriminatedUnion, object, literal, number, string, match } from "totalis";
+
+const shape = discriminatedUnion("kind", [
+  object({ kind: literal("circle"), radius: number() }),
+  object({ kind: literal("square"), side: number() }),
+]);
+type Shape = Infer<typeof shape>;
+
+const area = (s: Shape): number =>
+  match(s, "kind", {
+    circle: (c) => Math.PI * c.radius ** 2,
+    square: (q) => q.side ** 2,
+  });
+// "triangle" バリアントを追加すると、対応するまで全ての `match` 呼び出しが
+// コンパイルエラーになる。手書きの `switch` では default 分岐で `assertNever(x)`
+// を使えば同じ保証が得られる。
 ```
 
 ### 開発

@@ -137,6 +137,28 @@ export class ValidationError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Brands & precise output types
+//
+// Totality, pillar 2: the OUTPUT type should be the narrowest type that is
+// true, so that downstream code physically cannot represent a bug. A brand is
+// a type-level marker that only this library can attach (by validating). A
+// `Branded<string, "Email">` cannot be produced from a raw string, so a
+// function that takes an `Email` can never be handed an unvalidated value —
+// the "did I check this?" defensive guard disappears at compile time.
+// ---------------------------------------------------------------------------
+
+declare const brand: unique symbol;
+
+/** A type-level brand. Purely erased at runtime. */
+export type Brand<B extends string> = { readonly [brand]: { readonly [K in B]: true } };
+
+/** `T` carrying the brand `B`. Two brands compose: `Branded<Branded<T, "a">, "b">`. */
+export type Branded<T, B extends string> = T & Brand<B>;
+
+/** A non-empty array — the precise type a length check earns you. */
+export type NonEmptyArray<T> = [T, ...T[]];
+
 /** The discriminated result returned by {@link Schema.safeParse}. */
 export type ParseResult<T> =
   | { readonly success: true; readonly data: T }
@@ -196,6 +218,25 @@ export abstract class Schema<Output> implements StandardSchemaV1<Output, Output>
   /** Make this schema also accept `undefined`, producing an optional object key. */
   optional(): OptionalSchema<Output> {
     return new OptionalSchema(this);
+  }
+
+  /**
+   * Attach a type-level {@link Brand} to the validated output. The brand is
+   * erased at runtime; the runtime value is unchanged. The point is the type:
+   * only a value that passed THIS schema can have the brand, so downstream
+   * code can require the branded type instead of re-checking.
+   */
+  brand<B extends string>(): Schema<Branded<Output, B>> {
+    return new BrandSchema<Output, B>(this);
+  }
+
+  /**
+   * Narrow the accepted values with a runtime predicate. Returns a schema with
+   * the same output type; combine with {@link Schema.brand} to record the
+   * invariant in the type as well.
+   */
+  refine(check: (value: Output) => boolean, message = "Failed refinement"): Schema<Output> {
+    return new RefineSchema(this, check, message);
   }
 
   /** The Standard Schema v1 entry point. */
@@ -265,6 +306,35 @@ class OptionalSchema<T> extends Schema<T | undefined> {
   }
 }
 
+class BrandSchema<T, B extends string> extends Schema<Branded<T, B>> {
+  constructor(readonly inner: Schema<T>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Branded<T, B>> {
+    const result = this.inner._parse(input, path);
+    // The brand is type-level only, so a successful inner value already IS the
+    // branded value at runtime.
+    return result.ok ? ok(result.value as Branded<T, B>) : result;
+  }
+}
+
+class RefineSchema<T> extends Schema<T> {
+  constructor(
+    readonly inner: Schema<T>,
+    readonly check: (value: T) => boolean,
+    readonly message: string,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T> {
+    const result = this.inner._parse(input, path);
+    if (!result.ok) return result;
+    return this.check(result.value) ? result : fail(path, this.message);
+  }
+}
+
 class ArraySchema<T> extends Schema<T[]> {
   constructor(readonly element: Schema<T>) {
     super();
@@ -281,6 +351,25 @@ class ArraySchema<T> extends Schema<T[]> {
       else issues.push(...result.issues);
     }
     return issues.length > 0 ? { ok: false, issues } : ok(out);
+  }
+
+  /** Require at least one element, narrowing the output to {@link NonEmptyArray}. */
+  nonempty(): Schema<NonEmptyArray<T>> {
+    return new NonEmptyArraySchema(this);
+  }
+}
+
+class NonEmptyArraySchema<T> extends Schema<NonEmptyArray<T>> {
+  constructor(readonly inner: ArraySchema<T>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<NonEmptyArray<T>> {
+    const result = this.inner._parse(input, path);
+    if (!result.ok) return result;
+    return result.value.length > 0
+      ? ok(result.value as NonEmptyArray<T>)
+      : fail(path, "Expected a non-empty array");
   }
 }
 
@@ -362,6 +451,105 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
 
 export function object<S extends Shape>(shape: S): ObjectSchema<S> {
   return new ObjectSchema(shape);
+}
+
+/** An integer — `number` branded so a plain `number` can't stand in for it. */
+export type Integer = Branded<number, "int">;
+
+/** A number schema that also requires the value to be an integer. */
+export function int(): Schema<Integer> {
+  return number()
+    .refine((n) => Number.isInteger(n), "Expected an integer")
+    .brand<"int">();
+}
+
+// ---------------------------------------------------------------------------
+// Exhaustive discriminated unions
+//
+// Totality, pillar 3: adding a variant must force every consumer to handle it.
+// `discriminatedUnion` parses by a literal tag; {@link match} (or a `switch` +
+// {@link assertNever}) then makes "forgot a case" a COMPILE error, replacing
+// the runtime `default: throw new Error("unexpected")` guard.
+// ---------------------------------------------------------------------------
+
+/** Any object schema whose `[key]` field is a literal — a union variant. */
+type Variant<K extends string> = ObjectSchema<Shape & { readonly [P in K]: LiteralSchema<Literal> }>;
+
+class DiscriminatedUnionSchema<Out> extends Schema<Out> {
+  constructor(
+    readonly key: string,
+    readonly variants: ReadonlyArray<ObjectSchema<Shape>>,
+  ) {
+    super();
+  }
+
+  private discriminantOf(variant: ObjectSchema<Shape>): LiteralSchema<Literal> | undefined {
+    const schema = variant.shape[this.key];
+    return schema instanceof LiteralSchema ? schema : undefined;
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Out> {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+      return fail(path, `Expected object, received ${typeName(input)}`);
+    }
+    const tag = (input as Record<string, unknown>)[this.key];
+    for (const variant of this.variants) {
+      if (this.discriminantOf(variant)?.value === tag) {
+        return variant._parse(input, path) as Internal<Out>;
+      }
+    }
+    const expected = this.variants
+      .map((variant) => this.discriminantOf(variant))
+      .filter((schema): schema is LiteralSchema<Literal> => schema !== undefined)
+      .map((schema) => JSON.stringify(schema.value))
+      .join(" | ");
+    return fail(
+      [...path, this.key],
+      `Expected discriminant ${expected}, received ${JSON.stringify(tag)}`,
+    );
+  }
+}
+
+/**
+ * A discriminated union of object schemas keyed by the literal field `key`.
+ * The output type is the union of every variant's type.
+ */
+export function discriminatedUnion<K extends string, V extends ReadonlyArray<Variant<K>>>(
+  key: K,
+  variants: V,
+): Schema<Infer<V[number]>> {
+  return new DiscriminatedUnionSchema<Infer<V[number]>>(
+    key,
+    variants as ReadonlyArray<ObjectSchema<Shape>>,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// First-class exhaustiveness helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile-time exhaustiveness guard. Call in the `default` branch of a `switch`
+ * over a discriminated union: if a variant is left unhandled, `value` is not
+ * `never` and the call fails to compile.
+ */
+export function assertNever(value: never, message = "Unhandled variant"): never {
+  throw new Error(`${message}: ${JSON.stringify(value)}`);
+}
+
+/**
+ * Exhaustively match a discriminated value on its `key`. The compiler REQUIRES
+ * a handler for every discriminant value — add a variant and every `match`
+ * call site stops compiling until it is handled.
+ */
+export function match<K extends PropertyKey, T extends Record<K, string | number>, R>(
+  value: T,
+  key: K,
+  handlers: { [V in T[K]]: (value: Extract<T, Record<K, V>>) => R },
+): R {
+  const tag = value[key];
+  const handler = handlers[tag];
+  return handler(value as Extract<T, Record<K, T[K]>>);
 }
 
 // ---------------------------------------------------------------------------

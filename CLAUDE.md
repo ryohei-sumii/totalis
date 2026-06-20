@@ -25,26 +25,54 @@ We are NOT trying to beat Zod on the general case. That fight is lost:
 - **Raw runtime speed + type-from-string syntax** → ArkType (parses TS-like
   string literals into types; often 3–4x faster than Zod).
 
-Those three axes are taken. **Our axis is COMPLETENESS / EXHAUSTIVENESS (完全性・網羅性).**
+Those three axes are taken. **Our axis is TOTALITY (全域性) — completeness +
+exhaustiveness.** The name is the promise: a *total* function is defined for
+every input in its domain, with no partiality and no "this can't happen"
+branches.
 
-### The thesis
+### The thesis — one sentence
 
-Every existing library is fundamentally one-directional: schema → type. They
-let your runtime schema and your domain types silently drift apart. Our selling
-point is the reverse guarantee, made first-class instead of a side feature:
+> **You write the runtime check exactly once, at the boundary; in exchange the
+> type system guarantees you never need a defensive check again, and the bugs
+> that would have been `if (x == null) throw` become compile errors.**
 
-1. **type → schema completeness**: if a TS type gains a field, the schema that
-   claims to validate it must FAIL TO COMPILE until updated. (Prototype:
-   `schemaFor<T>()` in `totalis.ts`, using an `Equals<A,B>` mutual-assignability
-   check. Generalize this to the whole API.)
-2. **exhaustive unions**: discriminated unions get compile-time exhaustiveness;
-   adding a variant forces every consumer to handle it (`assertNever` pattern,
-   but built into the schema, not bolted on by the user).
-3. **no silent widening / no `any` leaks**: the type-level code must never
-   degrade to `any`. Tested with type-level assertions, not just runtime tests.
+This is "parse, don't validate": a validation library is the ONE place runtime
+checking is irreducible (network, user input, JSON). We do not pretend to
+remove runtime checks — we *concentrate* them at the boundary and, in return,
+make downstream defensive code (`?.`, `as`, re-validation, `default: throw`)
+unnecessary. Selling "no runtime checks" would be dishonest; selling "no
+*defensive* checks past the boundary" is exactly what we deliver.
 
-If a feature doesn't serve "your schema cannot drift from your type," it is not
-our priority.
+### Two promises
+
+**Promise 1 — Completeness (soundness of the boundary).** The boundary's output
+type never lies, because the schema cannot drift from the type it claims to
+validate.
+
+- **type → schema completeness**: if a TS type gains a field, the schema that
+  claims to validate it must FAIL TO COMPILE until updated (`schemaFor<T>()`,
+  via an `Equals<A,B>` mutual-assignability check). Generalize its spirit
+  everywhere.
+
+**Promise 2 — Totality (precision + exhaustiveness past the boundary).** The
+output type is the *narrowest type that is true*, and unions are exhaustive, so
+downstream code physically cannot represent a bug.
+
+- **make illegal states unrepresentable**: the parsed output should encode the
+  invariant the validator checked. Brands (`string().brand<"Email">()` →
+  `string & Brand<"Email">`) and refinements (`int()`, `array(...).nonempty()`
+  → `[T, ...T[]]`) mean a function that takes an `Email` can never be handed an
+  unvalidated string — the "did I check this?" guard disappears at compile time.
+  Note this STRENGTHENS Promise 1: `schemaFor<{ email: Email }>()` cannot be
+  satisfied by a plain `string()`.
+- **exhaustive unions**: discriminated unions get compile-time exhaustiveness;
+  adding a variant forces every consumer to handle it. Built into the library
+  (`discriminatedUnion`, `match`, `assertNever`), not bolted on by the user.
+- **no silent widening / no `any` leaks**: the type-level code must never
+  degrade to `any`. Tested with type-level assertions, not just runtime tests.
+
+If a feature doesn't serve "check once at the boundary, never write defensive
+code again," it is not our priority.
 
 ## Non-negotiable: Standard Schema v1.0
 
@@ -66,10 +94,21 @@ spec at https://standardschema.dev before implementing.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
   returns a discriminated `{ success: true; data } | { success: false; error }`.
 - `schemaFor<T>()` is the completeness primitive — extend its spirit everywhere.
+- **Standard Schema v1**: every schema implements `~standard`
+  (`StandardSchemaV1<Output, Output>`); the spec interface is vendored to keep
+  the core dependency-free.
+- **Totality primitives**: `brand<B>()` / `refine()` on the base, plus `int()`
+  and `array(...).nonempty()` for precise output types; `discriminatedUnion`,
+  `match` (compile-enforced exhaustive handling) and `assertNever`.
 
 ## Roadmap (in priority order)
 
-1. **Standard Schema v1.0 conformance** + a conformance test.
+1. ~~**Standard Schema v1.0 conformance** + a conformance test.~~ ✅ Done
+   (`standard-schema.test.ts` runtime + `standard-schema.test-d.ts` type-level).
+4. ~~**Exhaustive discriminated unions** with compile-time variant coverage.~~
+   ✅ Done (`discriminatedUnion` + `match` + `assertNever`; brands/refinements
+   for "illegal states unrepresentable"). Both pulled forward as the clearest
+   embodiment of Promise 2 (totality).
 2. **Two type params `Schema<Input, Output>`** so `transform` / `default` /
    codec (encode+decode) are type-safe. Bidirectional codecs are a secondary
    differentiator worth leaning into (Effect Schema has them but drags in all of
@@ -77,10 +116,11 @@ spec at https://standardschema.dev before implementing.
 3. **First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
    `satisfies`-style helper and good error messages when a schema is incomplete
    (the current `& "Schema does not match T"` trick is ugly — improve the DX).
-4. **Exhaustive discriminated unions** with compile-time variant coverage.
+   Resolve the brand-vs-completeness ergonomics (a domain type using `Email`
+   should guide you to `.brand<"Email">()`, not just error).
 5. Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type tests).
    Type-level correctness is the product, so it must be tested as rigorously as
-   runtime behavior.
+   runtime behavior. (Seeded: `*.test-d.ts` validated by `tsc --noEmit`.)
 6. Structured/tree errors + i18n-ready messages (errors aimed at end users, an
    underserved niche).
 
