@@ -42,8 +42,10 @@ describe("ValidationError.format() — tree", () => {
     expect(tree.properties?.address?.properties?.city?.errors).toHaveLength(1);
     expect(tree.properties?.address?.properties?.zip?.errors).toHaveLength(1);
     expect(tree.properties?.tags?.items?.[1]?.errors).toHaveLength(1);
-    // index 0 was valid, so it has no node
-    expect(tree.properties?.tags?.items?.[0]).toBeUndefined();
+    // `items` is dense (no holes): index 0 was valid, so it's an empty node,
+    // not `undefined` — the array never violates its `ErrorTree[]` element type.
+    expect(tree.properties?.tags?.items?.[0]).toEqual({ errors: [] });
+    expect(tree.properties?.tags?.items).toHaveLength(2);
   });
 });
 

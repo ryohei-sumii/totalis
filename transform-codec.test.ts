@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { codec, number, object, objectCodec, string } from "./totalis";
+import { array, codec, number, object, objectCodec, string } from "./totalis";
 
 const isoDateCodec = codec(string(), {
   decode: (s: string) => new Date(s),
@@ -44,6 +44,23 @@ describe("default", () => {
 
   it("still validates a provided value", () => {
     expect(schema.safeParse({ page: "nope" }).success).toBe(false);
+  });
+
+  it("does not share a mutable default across parses", () => {
+    const s = object({ tags: array(string()).default([]) });
+    const a = s.parse({});
+    const b = s.parse({});
+    expect(a.tags).not.toBe(b.tags); // distinct instances
+    a.tags.push("x");
+    expect(b.tags).toEqual([]); // mutating one must not affect the other
+    expect(s.parse({}).tags).toEqual([]); // nor the stored default
+  });
+
+  it("supports a thunk default (called fresh each parse)", () => {
+    let n = 0;
+    const s = object({ id: number().default(() => ++n) });
+    expect(s.parse({})).toEqual({ id: 1 });
+    expect(s.parse({})).toEqual({ id: 2 });
   });
 });
 

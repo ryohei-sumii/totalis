@@ -106,6 +106,10 @@ export declare namespace StandardSchemaV1 {
 /** The vendor name reported through the Standard Schema `~standard` property. */
 export const VENDOR = "totalis";
 
+// A global since Node 18 / modern browsers (see `engines.node >= 20`); declared
+// here so the core needs neither the DOM lib nor `@types/node`.
+declare function structuredClone<T>(value: T): T;
+
 // ---------------------------------------------------------------------------
 // Errors & results
 // ---------------------------------------------------------------------------
@@ -203,7 +207,11 @@ export class ValidationError extends Error {
       for (const segment of issue.path) {
         if (typeof segment === "number") {
           const items = (node.items ??= []);
-          node = items[segment] ??= { errors: [] };
+          // Keep `items` dense: fill any gap with empty nodes so the array
+          // never contains holes (which would violate its `ErrorTree[]` type
+          // and crash consumers iterating with `for...of`).
+          while (items.length <= segment) items.push({ errors: [] });
+          node = items[segment] ?? (items[segment] = { errors: [] });
         } else {
           const properties = (node.properties ??= {});
           node = properties[String(segment)] ??= { errors: [] };
@@ -359,9 +367,17 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
    * Supply a value used when the input is `undefined`. The input type gains
    * `undefined`; the output type does not — a defaulted field is always
    * present after decoding.
+   *
+   * Pass a thunk (`() => Output`) for full control / non-cloneable values. A
+   * plain value is deep-cloned per parse (via `structuredClone`) so a mutable
+   * default like `.default([])` is NOT shared across results.
    */
-  default(defaultValue: Output): Schema<Output, Input | undefined> {
-    return new DefaultSchema<Output, Input>(this, defaultValue);
+  default(defaultValue: Output | (() => Output)): Schema<Output, Input | undefined> {
+    const makeDefault: () => Output =
+      typeof defaultValue === "function"
+        ? (defaultValue as () => Output)
+        : () => structuredClone(defaultValue);
+    return new DefaultSchema<Output, Input>(this, makeDefault);
   }
 
   /** The Standard Schema v1 entry point (the decode direction). */
@@ -560,13 +576,14 @@ class TransformSchema<BaseOutput, Output, Input> extends Schema<Output, Input> {
 class DefaultSchema<Output, Input> extends Schema<Output, Input | undefined> {
   constructor(
     readonly base: Schema<Output, Input>,
-    readonly defaultValue: Output,
+    readonly makeDefault: () => Output,
   ) {
     super();
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Output> {
-    return input === undefined ? ok(this.defaultValue) : this.base._parse(input, path);
+    // Produce a fresh default each call so mutable defaults are never shared.
+    return input === undefined ? ok(this.makeDefault()) : this.base._parse(input, path);
   }
 }
 
@@ -819,16 +836,30 @@ export function codec<Input, Output>(
 type Variant<K extends string> = ObjectSchema<Shape & { readonly [P in K]: LiteralSchema<Literal> }>;
 
 class DiscriminatedUnionSchema<Out> extends Schema<Out> {
+  /** Maps each discriminant value to its variant for O(1), unambiguous dispatch. */
+  private readonly byTag = new Map<Literal, ObjectSchema<Shape>>();
+
   constructor(
     readonly key: string,
     readonly variants: ReadonlyArray<ObjectSchema<Shape>>,
   ) {
     super();
-  }
-
-  private discriminantOf(variant: ObjectSchema<Shape>): LiteralSchema<Literal> | undefined {
-    const schema = variant.shape[this.key];
-    return schema instanceof LiteralSchema ? schema : undefined;
+    for (const variant of variants) {
+      const discriminant = variant.shape[key];
+      if (!(discriminant instanceof LiteralSchema)) {
+        throw new Error(
+          `discriminatedUnion: every variant must have a literal "${key}" field`,
+        );
+      }
+      // A duplicate discriminant would make a variant the output type claims is
+      // valid permanently unreachable — reject it at construction instead.
+      if (this.byTag.has(discriminant.value)) {
+        throw new Error(
+          `discriminatedUnion: duplicate discriminant ${JSON.stringify(discriminant.value)} for "${key}"`,
+        );
+      }
+      this.byTag.set(discriminant.value, variant);
+    }
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Out> {
@@ -836,17 +867,10 @@ class DiscriminatedUnionSchema<Out> extends Schema<Out> {
       return fail(path, "invalid_type", { expected: "object", received: typeName(input) });
     }
     const tag = (input as Record<string, unknown>)[this.key];
-    for (const variant of this.variants) {
-      if (this.discriminantOf(variant)?.value === tag) {
-        return variant._parse(input, path) as Internal<Out>;
-      }
-    }
-    const expected = this.variants
-      .map((variant) => this.discriminantOf(variant))
-      .filter((schema): schema is LiteralSchema<Literal> => schema !== undefined)
-      .map((schema) => JSON.stringify(schema.value))
-      .join(" | ");
-    return fail([...path, this.key], "invalid_union", { options: expected, received: tag });
+    const variant = this.byTag.get(tag as Literal);
+    if (variant) return variant._parse(input, path) as Internal<Out>;
+    const options = [...this.byTag.keys()].map((value) => JSON.stringify(value)).join(" | ");
+    return fail([...path, this.key], "invalid_union", { options, received: tag });
   }
 }
 

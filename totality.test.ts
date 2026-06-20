@@ -75,6 +75,15 @@ describe("discriminatedUnion", () => {
       expect(issue.message).toContain("square");
     }
   });
+
+  it("throws at construction on a duplicate discriminant (no unreachable variant)", () => {
+    expect(() =>
+      discriminatedUnion("type", [
+        object({ type: literal("a"), x: number() }),
+        object({ type: literal("a"), y: string() }),
+      ]),
+    ).toThrow(/duplicate discriminant/);
+  });
 });
 
 describe("match & assertNever", () => {
