@@ -237,6 +237,17 @@ const d = isoDate.parse("2026-06-20T00:00:00.000Z"); // Date
 isoDate.encode(d);                                    // string — round-trips
 ```
 
+`objectCodec` lifts codecs to whole objects — every field must be a codec, so a
+one-directional `transform` field **fails to compile**:
+
+```ts
+import { objectCodec, string } from "totalis";
+
+const Event = objectCodec({ id: string(), at: isoDate });
+const e = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" }); // { id: string; at: Date }
+Event.encode(e); // { id: string; at: string }  — the whole object round-trips
+```
+
 Codecs are the lightweight, standalone answer to Effect Schema's bidirectional
 transforms — without pulling in a runtime.
 
@@ -511,6 +522,17 @@ type Encoded = InferInput<typeof isoDate>; // string
 
 const d = isoDate.parse("2026-06-20T00:00:00.000Z"); // Date
 isoDate.encode(d);                                    // string — ラウンドトリップ
+```
+
+`objectCodec` は codec をオブジェクト全体に持ち上げます。全フィールドが codec で
+なければならないので、一方向の `transform` フィールドは**コンパイルエラー**:
+
+```ts
+import { objectCodec, string } from "totalis";
+
+const Event = objectCodec({ id: string(), at: isoDate });
+const e = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" }); // { id: string; at: Date }
+Event.encode(e); // { id: string; at: string } — オブジェクト全体がラウンドトリップ
 ```
 
 codec は、Effect Schema の双方向変換に対する「ランタイムを引き込まない、単体で

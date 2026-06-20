@@ -115,6 +115,11 @@ spec at https://standardschema.dev before implementing.
 - **Totality primitives**: `brand<B>()` / `refine()` on the base, plus `int()`
   and `array(...).nonempty()` for precise output types; `discriminatedUnion`,
   `match` (compile-enforced exhaustive handling) and `assertNever`.
+- **Encodability is in the type**: `Codec<Output, Input>` (abstract) is "a
+  schema that can also `encode`". Primitives are identity codecs; `codec(...)`
+  and `objectCodec(...)` build real ones; `.brand()` / `.optional()` on a codec
+  stay codecs. `transform` returns a plain `Schema` (no `encode`), so a
+  non-invertible field cannot enter `objectCodec(...)` — it fails to compile.
 
 ## Roadmap (in priority order)
 
@@ -128,8 +133,9 @@ spec at https://standardschema.dev before implementing.
    codec (encode+decode) are type-safe.~~ ✅ Done (`Schema<Output, Input>`,
    `transform` / `default` / `codec` + `Codec.encode`; `transform-codec.test.ts`
    + `transform-codec.test-d.ts`). Bidirectional codecs are the lightweight
-   standalone alternative to Effect Schema. Next: object-level encode (a `codec`
-   inside `object(...)` decodes today, but `ObjectSchema` itself is decode-only).
+   standalone alternative to Effect Schema. Object-level encode is done too:
+   `objectCodec(...)` round-trips an object whose fields are all codecs (encode
+   is type-gated, so `transform` fields fail to compile).
 3. ~~**First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
    `satisfies`-style helper and good error messages.~~ ✅ Done. The expected
    shape is `SchemaFor<T> = { [K in keyof T]-?: Schema<T[K], unknown> }`, so

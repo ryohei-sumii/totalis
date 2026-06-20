@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { codec, number, object, string } from "./totalis";
+import { codec, number, object, objectCodec, string } from "./totalis";
+
+const isoDateCodec = codec(string(), {
+  decode: (s: string) => new Date(s),
+  encode: (d: Date) => d.toISOString(),
+});
 
 describe("transform", () => {
   it("maps the decoded value", () => {
@@ -71,5 +76,49 @@ describe("codec (bidirectional)", () => {
     const result = isoDate["~standard"].validate("2026-06-20T00:00:00.000Z");
     if (result instanceof Promise || result.issues) throw new Error("expected sync success");
     expect(result.value).toBeInstanceOf(Date);
+  });
+});
+
+describe("objectCodec (object-level encode)", () => {
+  const Event = objectCodec({
+    id: string(),
+    at: isoDateCodec,
+    label: string().optional(),
+  });
+
+  it("decodes input -> output via parse", () => {
+    const decoded = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" });
+    expect(decoded.id).toBe("e1");
+    expect(decoded.at).toBeInstanceOf(Date);
+  });
+
+  it("encodes output -> input field-by-field", () => {
+    const encoded = Event.encode({ id: "e1", at: new Date(0) });
+    expect(encoded).toEqual({ id: "e1", at: "1970-01-01T00:00:00.000Z" });
+  });
+
+  it("round-trips", () => {
+    const input = { id: "e1", at: "2026-06-20T12:34:56.000Z", label: "launch" };
+    expect(Event.encode(Event.parse(input))).toEqual(input);
+  });
+
+  it("handles an optional codec field on encode", () => {
+    expect(Event.encode({ id: "e1", at: new Date(0) })).not.toHaveProperty("label");
+  });
+
+  it("nests another objectCodec", () => {
+    const Outer = objectCodec({ when: isoDateCodec, inner: Event });
+    const decoded = Outer.parse({
+      when: "2026-01-01T00:00:00.000Z",
+      inner: { id: "x", at: "2026-02-02T00:00:00.000Z" },
+    });
+    expect(decoded.when).toBeInstanceOf(Date);
+    expect(decoded.inner.at).toBeInstanceOf(Date);
+    const reencoded = Outer.encode(decoded);
+    expect(reencoded.inner.at).toBe("2026-02-02T00:00:00.000Z");
+  });
+
+  it("still validates on decode", () => {
+    expect(Event.safeParse({ id: 1, at: "2026-06-20T00:00:00.000Z" }).success).toBe(false);
   });
 });

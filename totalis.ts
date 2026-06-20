@@ -323,7 +323,7 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
   }
 
   /** Make this schema also accept `undefined`, producing an optional object key. */
-  optional(): OptionalSchema<Output, Input> {
+  optional(): Schema<Output | undefined, Input | undefined> {
     return new OptionalSchema<Output, Input>(this);
   }
 
@@ -382,18 +382,48 @@ export type Infer<S extends Schema<unknown>> = S["_output"];
 export type InferInput<S extends Schema<unknown>> = S["_input"];
 
 // ---------------------------------------------------------------------------
+// Codec: the "can also ENCODE" capability
+//
+// Roadmap 2/object-encode: encodability is carried IN THE TYPE. A `Codec` is a
+// schema that, on top of decoding `Input -> Output`, can encode
+// `Output -> Input`. `transform` stays a plain `Schema` (no `encode`), so a
+// non-invertible field cannot sneak into a place that needs to round-trip —
+// it fails to compile. Primitives are identity codecs; `codec(...)` and
+// `objectCodec(...)` build real ones.
+// ---------------------------------------------------------------------------
+
+export abstract class Codec<Output, Input = Output> extends Schema<Output, Input> {
+  /** Encode a decoded value back into its input representation. */
+  abstract encode(value: Output): Input;
+
+  /** Brand the output while staying encodable (the brand is type-level only). */
+  override brand<B extends string>(): Codec<Branded<Output, B>, Input> {
+    return new BrandCodec<Output, B, Input>(this);
+  }
+
+  /** Accept `undefined` while staying encodable. */
+  override optional(): Codec<Output | undefined, Input | undefined> {
+    return new OptionalCodec<Output, Input>(this);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
 
-class StringSchema extends Schema<string> {
+class StringSchema extends Codec<string> {
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<string> {
     return typeof input === "string"
       ? ok(input)
       : fail(path, "invalid_type", { expected: "string", received: typeName(input) });
   }
+
+  encode(value: string): string {
+    return value;
+  }
 }
 
-class NumberSchema extends Schema<number> {
+class NumberSchema extends Codec<number> {
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<number> {
     if (typeof input !== "number") {
       return fail(path, "invalid_type", { expected: "number", received: typeName(input) });
@@ -403,20 +433,28 @@ class NumberSchema extends Schema<number> {
     }
     return ok(input);
   }
+
+  encode(value: number): number {
+    return value;
+  }
 }
 
-class BooleanSchema extends Schema<boolean> {
+class BooleanSchema extends Codec<boolean> {
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<boolean> {
     return typeof input === "boolean"
       ? ok(input)
       : fail(path, "invalid_type", { expected: "boolean", received: typeName(input) });
+  }
+
+  encode(value: boolean): boolean {
+    return value;
   }
 }
 
 /** Literal primitive values that can be matched exactly. */
 type Literal = string | number | boolean | null;
 
-class LiteralSchema<L extends Literal> extends Schema<L> {
+class LiteralSchema<L extends Literal> extends Codec<L> {
   constructor(readonly value: L) {
     super();
   }
@@ -425,6 +463,10 @@ class LiteralSchema<L extends Literal> extends Schema<L> {
     return input === this.value
       ? ok(this.value)
       : fail(path, "invalid_literal", { expected: this.value, received: input });
+  }
+
+  encode(value: L): L {
+    return value;
   }
 }
 
@@ -448,6 +490,38 @@ class BrandSchema<T, B extends string, Input> extends Schema<Branded<T, B>, Inpu
     // The brand is type-level only, so a successful inner value already IS the
     // branded value at runtime.
     return result.ok ? ok(result.value as Branded<T, B>) : result;
+  }
+}
+
+// Encodable counterparts of the wrappers: built only from a Codec inner, so
+// they can delegate `encode` and stay encodable (see Codec.brand / .optional).
+
+class BrandCodec<T, B extends string, Input> extends Codec<Branded<T, B>, Input> {
+  constructor(readonly inner: Codec<T, Input>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Branded<T, B>> {
+    const result = this.inner._parse(input, path);
+    return result.ok ? ok(result.value as Branded<T, B>) : result;
+  }
+
+  encode(value: Branded<T, B>): Input {
+    return this.inner.encode(value as T);
+  }
+}
+
+class OptionalCodec<T, Input> extends Codec<T | undefined, Input | undefined> {
+  constructor(readonly inner: Codec<T, Input>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | undefined> {
+    return input === undefined ? ok(undefined) : this.inner._parse(input, path);
+  }
+
+  encode(value: T | undefined): Input | undefined {
+    return value === undefined ? undefined : this.inner.encode(value);
   }
 }
 
@@ -497,12 +571,10 @@ class DefaultSchema<Output, Input> extends Schema<Output, Input | undefined> {
 }
 
 /**
- * A bidirectional schema: it validates+decodes `Input -> Output` like any
- * schema, and additionally {@link Codec.encode | encodes} `Output -> Input`.
- * Unlike {@link Schema.transform}, both directions are type-safe, so a codec
- * round-trips. Build one with {@link codec}.
+ * A {@link Codec} built from a base schema plus a decode/encode pair — the
+ * concrete schema returned by {@link codec}.
  */
-export class Codec<Output, Input> extends Schema<Output, Input> {
+class MappedCodec<Output, Input> extends Codec<Output, Input> {
   constructor(
     readonly base: Schema<Input>,
     private readonly decoder: (input: Input) => Output,
@@ -516,7 +588,6 @@ export class Codec<Output, Input> extends Schema<Output, Input> {
     return result.ok ? ok(this.decoder(result.value)) : result;
   }
 
-  /** Encode a decoded value back into its input representation. */
   encode(value: Output): Input {
     return this.encoder(value);
   }
@@ -573,7 +644,7 @@ export type Shape = Record<string, Schema<unknown>>;
 type Flatten<T> = { [K in keyof T]: T[K] } & {};
 
 /**
- * Derive an object type from a {@link Shape}. Keys whose schema admits
+ * Derive the decoded object type from a {@link Shape}. Keys whose schema admits
  * `undefined` become OPTIONAL keys (`age?: number`) rather than
  * `age: number | undefined`.
  */
@@ -583,30 +654,76 @@ export type InferShape<S extends Shape> = Flatten<
   }
 >;
 
+/** The INPUT (encoded) object type of a shape — the counterpart of {@link InferShape}. */
+export type InferShapeInput<S extends Shape> = Flatten<
+  { [K in keyof S as undefined extends InferInput<S[K]> ? never : K]: InferInput<S[K]> } & {
+    [K in keyof S as undefined extends InferInput<S[K]> ? K : never]?: InferInput<S[K]>;
+  }
+>;
+
+/** Decode an object against `shape`, threading `path` and collecting issues. */
+function parseShape(
+  shape: Shape,
+  input: unknown,
+  path: ReadonlyArray<PropertyKey>,
+): Internal<Record<string, unknown>> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(path, "invalid_type", { expected: "object", received: typeName(input) });
+  }
+  const record = input as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const issues: Issue[] = [];
+  for (const key of Object.keys(shape)) {
+    const schema = shape[key];
+    if (!schema) continue;
+    const present = key in record;
+    const result = schema._parse(record[key], [...path, key]);
+    if (!result.ok) issues.push(...result.issues);
+    else if (present || result.value !== undefined) out[key] = result.value;
+  }
+  return issues.length > 0 ? { ok: false, issues } : ok(out);
+}
+
 export class ObjectSchema<S extends Shape> extends Schema<InferShape<S>> {
   constructor(readonly shape: S) {
     super();
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<InferShape<S>> {
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      return fail(path, "invalid_type", { expected: "object", received: typeName(input) });
-    }
-    const record = input as Record<string, unknown>;
+    return parseShape(this.shape, input, path) as Internal<InferShape<S>>;
+  }
+}
+
+/** A {@link Shape} whose every field can encode — required by {@link objectCodec}. */
+export type EncodableShape = Record<string, Codec<unknown, unknown>>;
+
+/**
+ * An encodable object: decodes like {@link ObjectSchema} and additionally
+ * encodes field-by-field. Built by {@link objectCodec}; because every field
+ * must be a {@link Codec}, a one-directional `transform` field cannot be used —
+ * it fails to compile.
+ */
+export class ObjectCodec<S extends EncodableShape> extends Codec<
+  InferShape<S>,
+  InferShapeInput<S>
+> {
+  constructor(readonly shape: S) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<InferShape<S>> {
+    return parseShape(this.shape, input, path) as Internal<InferShape<S>>;
+  }
+
+  encode(value: InferShape<S>): InferShapeInput<S> {
+    const record = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    const issues: Issue[] = [];
     for (const key of Object.keys(this.shape)) {
-      const schema = this.shape[key];
-      if (!schema) continue;
-      const present = key in record;
-      const result = schema._parse(record[key], [...path, key]);
-      if (!result.ok) {
-        issues.push(...result.issues);
-      } else if (present || result.value !== undefined) {
-        out[key] = result.value;
-      }
+      const field = this.shape[key];
+      if (!field) continue;
+      if (key in record) out[key] = field.encode(record[key]);
     }
-    return issues.length > 0 ? { ok: false, issues } : ok(out as InferShape<S>);
+    return out as InferShapeInput<S>;
   }
 }
 
@@ -642,6 +759,24 @@ export function object<S extends Shape>(shape: S): ObjectSchema<S> {
   return new ObjectSchema(shape);
 }
 
+/**
+ * Build an encodable object (a {@link Codec}) — like {@link object}, but every
+ * field must itself be a {@link Codec}, so the whole object round-trips:
+ * `parse` decodes and `.encode(output)` reconstructs the input. A
+ * one-directional `transform` field fails to compile here.
+ *
+ * @example
+ *   const Event = objectCodec({
+ *     id: string(),
+ *     at: codec(string(), { decode: (s) => new Date(s), encode: (d) => d.toISOString() }),
+ *   });
+ *   const e = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" }); // { id: string; at: Date }
+ *   Event.encode(e); // { id: string; at: string }
+ */
+export function objectCodec<S extends EncodableShape>(shape: S): ObjectCodec<S> {
+  return new ObjectCodec(shape);
+}
+
 /** An integer — `number` branded so a plain `number` can't stand in for it. */
 export type Integer = Branded<number, "int">;
 
@@ -668,7 +803,7 @@ export function codec<Input, Output>(
   base: Schema<Input>,
   transform: { decode: (input: Input) => Output; encode: (output: Output) => Input },
 ): Codec<Output, Input> {
-  return new Codec(base, transform.decode, transform.encode);
+  return new MappedCodec(base, transform.decode, transform.encode);
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@
 import { assertType, describe, expectTypeOf, test } from "vitest";
 import type { StandardSchemaV1 as OfficialStandardSchemaV1 } from "@standard-schema/spec";
 
-import { codec, number, string, type Infer, type InferInput } from "./totalis";
+import { codec, number, object, objectCodec, string, type Infer, type InferInput } from "./totalis";
 
 const len = string().transform((s) => s.length);
 const withDefault = number().default(1);
@@ -60,5 +60,51 @@ describe("Standard Schema reflects the input/output split", () => {
     expectTypeOf<OfficialStandardSchemaV1.InferOutput<typeof isoDate>>().toEqualTypeOf<Date>();
     expectTypeOf<OfficialStandardSchemaV1.InferInput<typeof isoDate>>().toEqualTypeOf<string>();
     assertType<OfficialStandardSchemaV1<string, Date>>(isoDate);
+  });
+});
+
+describe("objectCodec: object-level encode is type-safe", () => {
+  const Event = objectCodec({
+    id: string(),
+    at: codec(string(), { decode: (s) => new Date(s), encode: (d) => d.toISOString() }),
+    label: string().optional(),
+  });
+
+  test("Infer is the decoded object", () => {
+    expectTypeOf<Infer<typeof Event>>().toEqualTypeOf<{
+      id: string;
+      at: Date;
+      label?: string | undefined;
+    }>();
+  });
+
+  test("InferInput is the encoded object", () => {
+    expectTypeOf<InferInput<typeof Event>>().toEqualTypeOf<{
+      id: string;
+      at: string;
+      label?: string | undefined;
+    }>();
+  });
+
+  test("encode maps decoded -> encoded", () => {
+    expectTypeOf(Event.encode).returns.toEqualTypeOf<{
+      id: string;
+      at: string;
+      label?: string | undefined;
+    }>();
+  });
+
+  test("a one-directional transform field does not compile", () => {
+    objectCodec({
+      // @ts-expect-error — transform is decode-only, so it is not a Codec.
+      n: string().transform((s) => s.length),
+    });
+  });
+
+  test("a decode-only object() field does not compile", () => {
+    objectCodec({
+      // @ts-expect-error — object() is decode-only; use objectCodec for nesting.
+      inner: object({ a: string() }),
+    });
   });
 });
