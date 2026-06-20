@@ -66,7 +66,7 @@ props.vendor;  // "totalis"
 ### Installation
 
 ```bash
-npm install totalis
+pnpm add totalis
 ```
 
 > No runtime dependencies. The Standard Schema interface is vendored, so the
@@ -284,10 +284,10 @@ if (!result.success) {
 ### Development
 
 ```bash
-npm install
-npm run typecheck   # tsc --noEmit — authoritative full-project gate
-npm test            # runtime + type-level tests (Vitest, typecheck enabled)
-npm run test:types  # only the *.test-d.ts type tests
+pnpm install        # pnpm only — `npm`/`yarn` are blocked by a preinstall guard
+pnpm run typecheck  # tsc --noEmit — authoritative full-project gate
+pnpm test           # runtime + type-level tests (Vitest, typecheck enabled)
+pnpm run test:types # only the *.test-d.ts type tests
 ```
 
 Every feature ships with **both** a runtime test and a type-level test.
@@ -352,7 +352,7 @@ props.vendor;  // "totalis"
 ### インストール
 
 ```bash
-npm install totalis
+pnpm add totalis
 ```
 
 > ランタイム依存はありません。Standard Schema のインターフェースは同梱（vendoring）
@@ -571,10 +571,10 @@ if (!result.success) {
 ### 開発
 
 ```bash
-npm install
-npm run typecheck   # tsc --noEmit — プロジェクト全体の最終ゲート
-npm test            # ランタイム + 型レベルテスト (Vitest, typecheck 有効)
-npm run test:types  # *.test-d.ts の型テストのみ
+pnpm install        # pnpm 専用（`npm`/`yarn` は preinstall ガードで弾かれる）
+pnpm run typecheck  # tsc --noEmit — プロジェクト全体の最終ゲート
+pnpm test           # ランタイム + 型レベルテスト (Vitest, typecheck 有効)
+pnpm run test:types # *.test-d.ts の型テストのみ
 ```
 
 すべての機能は、ランタイムテストと型レベルテストの**両方**を伴って提供されます。

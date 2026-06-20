@@ -148,7 +148,7 @@ spec at https://standardschema.dev before implementing.
 5. ~~Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type
    tests).~~ ✅ Done. `*.test-d.ts` are vitest type tests (`expectTypeOf` /
    `assertType` + `@ts-expect-error` negatives) run via `typecheck` (Vitest
-   config `typecheck.enabled`), so `npm test` runs runtime AND type tests
+   config `typecheck.enabled`), so `pnpm test` runs runtime AND type tests
    together; `tsc --noEmit` remains the authoritative full-project gate.
 6. ~~Structured/tree errors + i18n-ready messages (errors aimed at end users,
    an underserved niche).~~ ✅ Done. Each `Issue` carries a machine-readable
@@ -163,14 +163,17 @@ spec at https://standardschema.dev before implementing.
   in the public type surface as a bug.
 - No runtime deps in the core. Keep it tree-shakable.
 - Every feature ships with BOTH a runtime test and a type-level test.
+- **pnpm only.** `packageManager` is pinned and a `preinstall` (`only-allow
+  pnpm`) blocks `npm`/`yarn`. Use `pnpm` for all install/script commands; the
+  committed lockfile is `pnpm-lock.yaml`.
 
 ## Commands
 
 ```bash
-npm install            # deps
-npx tsc --noEmit       # typecheck the whole project (authoritative gate)
-npm test               # runtime + type-level tests (Vitest, typecheck enabled)
-npm run test:types     # only the *.test-d.ts type tests
+pnpm install           # deps (pnpm only — `npm`/`yarn` are blocked by preinstall)
+pnpm run typecheck     # tsc --noEmit — typecheck the whole project (authoritative gate)
+pnpm test              # runtime + type-level tests (Vitest, typecheck enabled)
+pnpm run test:types    # only the *.test-d.ts type tests
 ```
 
 ## House rules for Claude Code

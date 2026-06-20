@@ -6,10 +6,16 @@
   "type": "module",
   "main": "totalis.ts",
   "types": "totalis.ts",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
   "files": [
     "totalis.ts"
   ],
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:types": "vitest run --typecheck.only",
