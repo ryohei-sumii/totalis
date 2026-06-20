@@ -188,16 +188,25 @@ function typeName(value: unknown): string {
 /**
  * The abstract base of every schema.
  *
- * `_output` is a phantom field: it carries the validated output type at the
- * type level without ever existing at runtime. {@link Infer} recovers it.
+ * Two type params: `Output` is the decoded/validated type you get out (what
+ * 95% of code wants, so it comes first and `Input` defaults to it — the
+ * single-arg `Schema<T>` still means `Schema<T, T>`). `Input` is the type the
+ * schema decodes FROM; it only diverges from `Output` for `transform` /
+ * `default` / `codec`.
  *
- * Implementing `StandardSchemaV1<Output, Output>` makes every schema plug into
- * the Standard Schema ecosystem (tRPC, Hono, React Hook Form, ...) for free.
+ * `_output` / `_input` are phantom fields: they carry the types at the type
+ * level without ever existing at runtime. {@link Infer} / {@link InferInput}
+ * recover them.
+ *
+ * Implementing `StandardSchemaV1<Input, Output>` makes every schema plug into
+ * the Standard Schema ecosystem (tRPC, Hono, React Hook Form, ...) for free;
+ * `validate` is the DECODE direction (`Input -> Output`).
  */
-export abstract class Schema<Output> implements StandardSchemaV1<Output, Output> {
+export abstract class Schema<Output, Input = Output> implements StandardSchemaV1<Input, Output> {
   declare readonly _output: Output;
+  declare readonly _input: Input;
 
-  /** Validate `input`, threading `path` for nested error reporting. */
+  /** Validate (decode) `input`, threading `path` for nested error reporting. */
   abstract _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Output>;
 
   /** Validate and return the value, throwing {@link ValidationError} on failure. */
@@ -216,8 +225,8 @@ export abstract class Schema<Output> implements StandardSchemaV1<Output, Output>
   }
 
   /** Make this schema also accept `undefined`, producing an optional object key. */
-  optional(): OptionalSchema<Output> {
-    return new OptionalSchema(this);
+  optional(): OptionalSchema<Output, Input> {
+    return new OptionalSchema<Output, Input>(this);
   }
 
   /**
@@ -226,8 +235,8 @@ export abstract class Schema<Output> implements StandardSchemaV1<Output, Output>
    * only a value that passed THIS schema can have the brand, so downstream
    * code can require the branded type instead of re-checking.
    */
-  brand<B extends string>(): Schema<Branded<Output, B>> {
-    return new BrandSchema<Output, B>(this);
+  brand<B extends string>(): Schema<Branded<Output, B>, Input> {
+    return new BrandSchema<Output, B, Input>(this);
   }
 
   /**
@@ -235,12 +244,30 @@ export abstract class Schema<Output> implements StandardSchemaV1<Output, Output>
    * the same output type; combine with {@link Schema.brand} to record the
    * invariant in the type as well.
    */
-  refine(check: (value: Output) => boolean, message = "Failed refinement"): Schema<Output> {
-    return new RefineSchema(this, check, message);
+  refine(check: (value: Output) => boolean, message = "Failed refinement"): Schema<Output, Input> {
+    return new RefineSchema<Output, Input>(this, check, message);
   }
 
-  /** The Standard Schema v1 entry point. */
-  readonly "~standard": StandardSchemaV1.Props<Output, Output> = {
+  /**
+   * Map the decoded value to a new type. One-directional: a transformed schema
+   * decodes but cannot {@link Codec.encode | encode} (the function may not be
+   * invertible), and the type reflects that — there is no `encode` to call.
+   */
+  transform<Output2>(fn: (value: Output) => Output2): Schema<Output2, Input> {
+    return new TransformSchema<Output, Output2, Input>(this, fn);
+  }
+
+  /**
+   * Supply a value used when the input is `undefined`. The input type gains
+   * `undefined`; the output type does not — a defaulted field is always
+   * present after decoding.
+   */
+  default(defaultValue: Output): Schema<Output, Input | undefined> {
+    return new DefaultSchema<Output, Input>(this, defaultValue);
+  }
+
+  /** The Standard Schema v1 entry point (the decode direction). */
+  readonly "~standard": StandardSchemaV1.Props<Input, Output> = {
     version: 1,
     vendor: VENDOR,
     validate: (value: unknown): StandardSchemaV1.Result<Output> => {
@@ -250,8 +277,11 @@ export abstract class Schema<Output> implements StandardSchemaV1<Output, Output>
   };
 }
 
-/** Recover the validated output type of a schema. */
+/** Recover the decoded (output) type of a schema. */
 export type Infer<S extends Schema<unknown>> = S["_output"];
+
+/** Recover the input (encoded) type a schema decodes from. */
+export type InferInput<S extends Schema<unknown>> = S["_input"];
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -296,8 +326,8 @@ class LiteralSchema<L extends Literal> extends Schema<L> {
   }
 }
 
-class OptionalSchema<T> extends Schema<T | undefined> {
-  constructor(readonly inner: Schema<T>) {
+class OptionalSchema<T, Input = T> extends Schema<T | undefined, Input | undefined> {
+  constructor(readonly inner: Schema<T, Input>) {
     super();
   }
 
@@ -306,8 +336,8 @@ class OptionalSchema<T> extends Schema<T | undefined> {
   }
 }
 
-class BrandSchema<T, B extends string> extends Schema<Branded<T, B>> {
-  constructor(readonly inner: Schema<T>) {
+class BrandSchema<T, B extends string, Input> extends Schema<Branded<T, B>, Input> {
+  constructor(readonly inner: Schema<T, Input>) {
     super();
   }
 
@@ -319,9 +349,9 @@ class BrandSchema<T, B extends string> extends Schema<Branded<T, B>> {
   }
 }
 
-class RefineSchema<T> extends Schema<T> {
+class RefineSchema<T, Input> extends Schema<T, Input> {
   constructor(
-    readonly inner: Schema<T>,
+    readonly inner: Schema<T, Input>,
     readonly check: (value: T) => boolean,
     readonly message: string,
   ) {
@@ -332,6 +362,59 @@ class RefineSchema<T> extends Schema<T> {
     const result = this.inner._parse(input, path);
     if (!result.ok) return result;
     return this.check(result.value) ? result : fail(path, this.message);
+  }
+}
+
+class TransformSchema<BaseOutput, Output, Input> extends Schema<Output, Input> {
+  constructor(
+    readonly base: Schema<BaseOutput, Input>,
+    readonly fn: (value: BaseOutput) => Output,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Output> {
+    const result = this.base._parse(input, path);
+    return result.ok ? ok(this.fn(result.value)) : result;
+  }
+}
+
+class DefaultSchema<Output, Input> extends Schema<Output, Input | undefined> {
+  constructor(
+    readonly base: Schema<Output, Input>,
+    readonly defaultValue: Output,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Output> {
+    return input === undefined ? ok(this.defaultValue) : this.base._parse(input, path);
+  }
+}
+
+/**
+ * A bidirectional schema: it validates+decodes `Input -> Output` like any
+ * schema, and additionally {@link Codec.encode | encodes} `Output -> Input`.
+ * Unlike {@link Schema.transform}, both directions are type-safe, so a codec
+ * round-trips. Build one with {@link codec}.
+ */
+export class Codec<Output, Input> extends Schema<Output, Input> {
+  constructor(
+    readonly base: Schema<Input>,
+    private readonly decoder: (input: Input) => Output,
+    private readonly encoder: (output: Output) => Input,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Output> {
+    const result = this.base._parse(input, path);
+    return result.ok ? ok(this.decoder(result.value)) : result;
+  }
+
+  /** Encode a decoded value back into its input representation. */
+  encode(value: Output): Input {
+    return this.encoder(value);
   }
 }
 
@@ -457,10 +540,29 @@ export function object<S extends Shape>(shape: S): ObjectSchema<S> {
 export type Integer = Branded<number, "int">;
 
 /** A number schema that also requires the value to be an integer. */
-export function int(): Schema<Integer> {
+export function int(): Schema<Integer, number> {
   return number()
     .refine((n) => Number.isInteger(n), "Expected an integer")
     .brand<"int">();
+}
+
+/**
+ * Build a bidirectional {@link Codec} on top of a base schema. `decode` runs
+ * after the base validates the input representation; `encode` is its inverse.
+ *
+ * @example
+ *   const isoDate = codec(string(), {
+ *     decode: (s) => new Date(s),
+ *     encode: (d) => d.toISOString(),
+ *   }); // Codec<Date, string>
+ *   isoDate.parse("2026-06-20T00:00:00.000Z"); // Date
+ *   isoDate.encode(new Date(0));               // string
+ */
+export function codec<Input, Output>(
+  base: Schema<Input>,
+  transform: { decode: (input: Input) => Output; encode: (output: Output) => Input },
+): Codec<Output, Input> {
+  return new Codec(base, transform.decode, transform.encode);
 }
 
 // ---------------------------------------------------------------------------

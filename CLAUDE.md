@@ -85,8 +85,17 @@ spec at https://standardschema.dev before implementing.
 
 ## Current architecture (in totalis.ts)
 
-- `Schema<Output>` abstract base, with a phantom `declare readonly _output`
-  field. `Infer<S> = S["_output"]` recovers the type.
+- `Schema<Output, Input = Output>` abstract base, with phantom
+  `declare readonly _output` / `_input` fields. `Infer<S> = S["_output"]` and
+  `InferInput<S> = S["_input"]` recover them. `Output` is first because it is
+  what callers want 95% of the time; `Input` defaults to it, so the single-arg
+  `Schema<T>` still means `Schema<T, T>`. `Input` diverges only for
+  `transform` / `default` / `codec`.
+- `transform(fn)` (decode-only, `Output` changes, `Input` preserved),
+  `default(value)` (`Input` gains `undefined`, `Output` does not), and the
+  bidirectional `Codec<Output, Input>` built by `codec(base, { decode, encode })`
+  with a type-safe `.encode(output): input`. Transformed schemas are decode-only
+  by design — there is no `encode` to call.
 - Primitives: string / number / boolean / literal (literal uses `const L` to
   preserve literal types).
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
@@ -95,8 +104,8 @@ spec at https://standardschema.dev before implementing.
   returns a discriminated `{ success: true; data } | { success: false; error }`.
 - `schemaFor<T>()` is the completeness primitive — extend its spirit everywhere.
 - **Standard Schema v1**: every schema implements `~standard`
-  (`StandardSchemaV1<Output, Output>`); the spec interface is vendored to keep
-  the core dependency-free.
+  (`StandardSchemaV1<Input, Output>`, `validate` = the decode direction); the
+  spec interface is vendored to keep the core dependency-free.
 - **Totality primitives**: `brand<B>()` / `refine()` on the base, plus `int()`
   and `array(...).nonempty()` for precise output types; `discriminatedUnion`,
   `match` (compile-enforced exhaustive handling) and `assertNever`.
@@ -109,10 +118,12 @@ spec at https://standardschema.dev before implementing.
    ✅ Done (`discriminatedUnion` + `match` + `assertNever`; brands/refinements
    for "illegal states unrepresentable"). Both pulled forward as the clearest
    embodiment of Promise 2 (totality).
-2. **Two type params `Schema<Input, Output>`** so `transform` / `default` /
-   codec (encode+decode) are type-safe. Bidirectional codecs are a secondary
-   differentiator worth leaning into (Effect Schema has them but drags in all of
-   Effect; we can be the lightweight standalone option).
+2. ~~**Two type params `Schema<Input, Output>`** so `transform` / `default` /
+   codec (encode+decode) are type-safe.~~ ✅ Done (`Schema<Output, Input>`,
+   `transform` / `default` / `codec` + `Codec.encode`; `transform-codec.test.ts`
+   + `transform-codec.test-d.ts`). Bidirectional codecs are the lightweight
+   standalone alternative to Effect Schema. Next: object-level encode (a `codec`
+   inside `object(...)` decodes today, but `ObjectSchema` itself is decode-only).
 3. **First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
    `satisfies`-style helper and good error messages when a schema is incomplete
    (the current `& "Schema does not match T"` trick is ugly — improve the DX).

@@ -192,6 +192,38 @@ const area = (s: Shape): number =>
 // the same guarantee.
 ```
 
+#### Transform, default, and bidirectional codecs
+
+`Schema<Output, Input>` tracks two types: the decoded `Output` and the `Input`
+it decodes from. They diverge for `transform`, `default`, and `codec`.
+
+```ts
+import { string, number, codec, type Infer, type InferInput } from "totalis";
+
+// transform: one-directional. Output changes; Input is preserved.
+const length = string().transform((s) => s.length);
+length.parse("hello"); // 5  (Infer = number, InferInput = string)
+// length.encode(...) ✗ does not exist — a transform may not be invertible.
+
+// default: the Input gains `undefined`, the Output stays present.
+const page = number().default(1);
+page.parse(undefined); // 1  (Infer = number, InferInput = number | undefined)
+
+// codec: bidirectional and type-safe in BOTH directions.
+const isoDate = codec(string(), {
+  decode: (s) => new Date(s),
+  encode: (d) => d.toISOString(),
+});
+type Decoded = Infer<typeof isoDate>;     // Date
+type Encoded = InferInput<typeof isoDate>; // string
+
+const d = isoDate.parse("2026-06-20T00:00:00.000Z"); // Date
+isoDate.encode(d);                                    // string — round-trips
+```
+
+Codecs are the lightweight, standalone answer to Effect Schema's bidirectional
+transforms — without pulling in a runtime.
+
 ### Development
 
 ```bash
@@ -388,6 +420,38 @@ const area = (s: Shape): number =>
 // コンパイルエラーになる。手書きの `switch` では default 分岐で `assertNever(x)`
 // を使えば同じ保証が得られる。
 ```
+
+#### transform・default・双方向 codec
+
+`Schema<Output, Input>` は2つの型を追跡します。デコード後の `Output` と、その
+デコード元の `Input` です。`transform`・`default`・`codec` でこの2つが分岐します。
+
+```ts
+import { string, number, codec, type Infer, type InferInput } from "totalis";
+
+// transform: 一方向。Output が変わり、Input は保たれる。
+const length = string().transform((s) => s.length);
+length.parse("hello"); // 5  (Infer = number, InferInput = string)
+// length.encode(...) ✗ 存在しない — transform は可逆とは限らないため。
+
+// default: Input が `undefined` を許容し、Output は常に存在する。
+const page = number().default(1);
+page.parse(undefined); // 1  (Infer = number, InferInput = number | undefined)
+
+// codec: 双方向。両方向とも型安全。
+const isoDate = codec(string(), {
+  decode: (s) => new Date(s),
+  encode: (d) => d.toISOString(),
+});
+type Decoded = Infer<typeof isoDate>;     // Date
+type Encoded = InferInput<typeof isoDate>; // string
+
+const d = isoDate.parse("2026-06-20T00:00:00.000Z"); // Date
+isoDate.encode(d);                                    // string — ラウンドトリップ
+```
+
+codec は、Effect Schema の双方向変換に対する「ランタイムを引き込まない、単体で
+軽量な」答えです。
 
 ### 開発
 
