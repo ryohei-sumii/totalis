@@ -105,4 +105,16 @@ describe("match & assertNever", () => {
   it("assertNever throws when reached at runtime", () => {
     expect(() => assertNever("unexpected" as never)).toThrow(/Unhandled variant/);
   });
+
+  it("throws a clear error for an out-of-range tag (incl. Object.prototype keys)", () => {
+    const handlers = { circle: () => 1, square: () => 2 };
+    // A cast / unvalidated value carrying a tag with no own handler.
+    expect(() => match({ type: "triangle" } as never, "type", handlers as never)).toThrow(
+      /no handler/,
+    );
+    // "toString" resolves an inherited method — must still be rejected, not invoked.
+    expect(() => match({ type: "toString" } as never, "type", handlers as never)).toThrow(
+      /no handler/,
+    );
+  });
 });

@@ -106,10 +106,6 @@ export declare namespace StandardSchemaV1 {
 /** The vendor name reported through the Standard Schema `~standard` property. */
 export const VENDOR = "totalis";
 
-// A global since Node 18 / modern browsers (see `engines.node >= 20`); declared
-// here so the core needs neither the DOM lib nor `@types/node`.
-declare function structuredClone<T>(value: T): T;
-
 // ---------------------------------------------------------------------------
 // Errors & results
 // ---------------------------------------------------------------------------
@@ -372,17 +368,17 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
    * `undefined`; the output type does not — a defaulted field is always
    * present after decoding.
    *
-   * Pass a thunk (`() => Output`) for full control / non-cloneable values. A
-   * plain value is deep-cloned per parse (via `structuredClone`) so a mutable
-   * default like `.default([])` is NOT shared across results.
+   * Pass a THUNK (`() => Output`) when you need a fresh value each parse —
+   * required for mutable defaults (`() => []`, `() => ({})`) and class
+   * instances, since a plain value is returned as-is (shared) and is NOT
+   * cloned. (We don't clone: cloning would strip class prototypes and throw on
+   * non-cloneable values, making the output type lie — so the choice is yours.)
    *
    * Decode-only: returns a plain `Schema` (no `encode`) even on a {@link Codec}.
    */
   default(defaultValue: Output | (() => Output)): Schema<Output, Input | undefined> {
     const makeDefault: () => Output =
-      typeof defaultValue === "function"
-        ? (defaultValue as () => Output)
-        : () => structuredClone(defaultValue);
+      typeof defaultValue === "function" ? (defaultValue as () => Output) : () => defaultValue;
     return new DefaultSchema<Output, Input>(this, makeDefault);
   }
 
@@ -937,11 +933,12 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
   handlers: { [V in T[K]]: (value: Extract<T, Record<K, V>>) => R },
 ): R {
   const tag = value[key];
-  const handler = handlers[tag];
   // The type system guarantees a handler for every static tag; this guards the
   // case where `value` reached us via a cast / unvalidated JSON with an
-  // out-of-range tag, turning an opaque "handler is not a function" TypeError
-  // into a clear, assertNever-style error.
+  // out-of-range tag. Use an OWN-property check so a tag colliding with an
+  // Object.prototype member (e.g. "toString", "constructor") is rejected rather
+  // than silently invoking the inherited method.
+  const handler = Object.prototype.hasOwnProperty.call(handlers, tag) ? handlers[tag] : undefined;
   if (typeof handler !== "function") {
     throw new Error(`match: no handler for ${String(key)}=${JSON.stringify(tag)}`);
   }

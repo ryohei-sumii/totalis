@@ -46,14 +46,13 @@ describe("default", () => {
     expect(schema.safeParse({ page: "nope" }).success).toBe(false);
   });
 
-  it("does not share a mutable default across parses", () => {
-    const s = object({ tags: array(string()).default([]) });
+  it("a thunk default yields a fresh value each parse (not shared)", () => {
+    const s = object({ tags: array(string()).default(() => []) });
     const a = s.parse({});
     const b = s.parse({});
     expect(a.tags).not.toBe(b.tags); // distinct instances
     a.tags.push("x");
     expect(b.tags).toEqual([]); // mutating one must not affect the other
-    expect(s.parse({}).tags).toEqual([]); // nor the stored default
   });
 
   it("supports a thunk default (called fresh each parse)", () => {
@@ -61,6 +60,15 @@ describe("default", () => {
     const s = object({ id: number().default(() => ++n) });
     expect(s.parse({})).toEqual({ id: 1 });
     expect(s.parse({})).toEqual({ id: 2 });
+  });
+
+  it("a class-instance (Date) default is returned as-is, prototype intact", () => {
+    const now = new Date(0);
+    const dateFromIso = codec(string(), { decode: (v) => new Date(v), encode: (d) => d.toISOString() });
+    const s = object({ at: dateFromIso.default(now) });
+    const parsed = s.parse({});
+    expect(parsed.at).toBe(now); // not cloned
+    expect(parsed.at).toBeInstanceOf(Date); // prototype intact
   });
 });
 
