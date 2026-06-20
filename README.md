@@ -44,6 +44,67 @@ unnecessary. We deliver it as **two promises**:
    - **no silent widening / no `any` leaks** — verified with type-level tests,
      not just runtime tests.
 
+### Why totalis? (vs TypeScript and Zod)
+
+**vs the TypeScript type system alone** — types are erased at runtime, so a
+cast is just a promise you hope is true:
+
+```ts
+interface User { id: string; email: string }
+
+// TypeScript only: the cast is a LIE. Nothing checked the shape.
+const u1 = JSON.parse(body) as User;
+u1.email.toUpperCase(); // 💥 runtime crash if `email` was missing — TS swore it existed
+
+// totalis: ONE runtime check at the boundary, and the type is now true.
+const User = object({ id: string(), email: string() });
+const u2 = User.parse(JSON.parse(body)); // throws ValidationError if the shape is wrong
+u2.email.toUpperCase(); // safe — guaranteed by the check, not by a cast
+```
+
+**vs Zod — your schema cannot silently drift from your domain type.** In Zod
+the type is *derived from* the schema (`z.infer`), so when you keep a
+hand-written domain type (shared package, codegen, an API contract), nothing
+forces the schema to stay complete:
+
+```ts
+interface User { id: string; email: string; age: number }
+
+// Zod: a separate domain type and a schema that forgot a field both compile.
+const ZUser = z.object({ id: z.string(), email: z.string() }); // 🙈 no `age`
+// z.infer<typeof ZUser> is { id, email } — quietly NOT User. The gap only
+// surfaces later (if ever), far from the schema.
+
+// totalis: completeness is enforced AT THE SCHEMA, with a native per-field error.
+const User = schemaFor<User>()({
+  id: string(),
+  email: string(),
+}); // ❌ compile error: Property 'age' is missing in type '{ id: ...; email: ... }'
+```
+
+Add a field to `User` and **every** schema claiming to validate it fails to
+compile until updated. (Zod can approximate this with
+`schema satisfies z.ZodType<User>`, but the errors are opaque and it is not the
+default workflow — in totalis it is the headline feature, with errors that name
+the exact missing/wrong field.)
+
+**vs Zod — validation is recorded in the type, so you can't forget it.** A
+branded output means an unvalidated value is a *compile* error, not a runtime
+surprise:
+
+```ts
+type Email = Branded<string, "Email">;
+const Email = string().brand<"Email">();
+declare function sendInvite(to: Email): void;
+
+sendInvite(Email.parse(input)); // ✅
+sendInvite(input);              // ❌ compile error: a raw string is not an Email
+```
+
+We are **not** trying to beat Zod in general (ecosystem, plugins, breadth).
+totalis bets on one axis: **totality** — concentrate the runtime check at the
+boundary, and make every defensive check past it a compile error instead.
+
 ### Standard Schema v1.0
 
 totalis implements the [Standard Schema v1](https://standardschema.dev)
@@ -281,6 +342,40 @@ if (!result.success) {
 }
 ```
 
+#### What fails, and when
+
+totalis splits failures into two kinds: bad **data** fails at runtime (where you
+asked for the check), and a bad **schema/usage** fails at compile time (so it
+never ships).
+
+```ts
+const User = schemaFor<{ id: string; tags: [string, ...string[]] }>()({
+  id: string(),
+  tags: array(string()).nonempty(),
+});
+
+// ── Runtime failures (invalid DATA at the boundary) ──────────────────────────
+User.parse({ id: 1, tags: ["a"] });        // throws: Expected string, received number at id
+User.parse({ id: "x", tags: [] });         // throws: Expected a non-empty array at tags
+User.safeParse({}).success;                // false — issues: [{code:"invalid_type", path:["id"]}, ...]
+int().parse(1.5);                          // throws: Expected an integer
+
+// ── Compile-time failures (invalid SCHEMA / USAGE — never reach runtime) ─────
+schemaFor<{ id: string; n: number }>()({ id: string() });
+//        ❌ Property 'n' is missing                     (incomplete schema)
+schemaFor<{ email: Email }>()({ email: string() });
+//        ❌ string is not Schema<Branded<string,"Email">> (must .brand<"Email">())
+objectCodec({ n: string().transform((s) => s.length) });
+//        ❌ a transform field is not a Codec            (can't round-trip)
+match(shape, "kind", { circle: (c) => c.radius });
+//        ❌ Property 'square' is missing                (non-exhaustive)
+const e: Email = "raw@example.com";
+//        ❌ string is not assignable to Email           (skipped validation)
+```
+
+The rule of thumb: **if it depends on a runtime value, it throws at the
+boundary; if it depends only on types, it won't compile.**
+
 ### Development
 
 ```bash
@@ -329,6 +424,64 @@ ArkType に勝とうとはしません。それらの軸はすでに埋まって
      の対応を強制する。1つ追加すれば、対応するまで全呼び出し箇所が壊れる。
    - **暗黙の拡大なし／`any` の漏れなし** — ランタイムテストだけでなく型レベル
      テストでも検証。
+
+### なぜ totalis か（TypeScript・Zod との比較）
+
+**TypeScript の型システム単体との比較** — 型は実行時に消えるので、キャストは
+「そうであってほしい」という願望にすぎません:
+
+```ts
+interface User { id: string; email: string }
+
+// TypeScript だけ: このキャストは嘘。形は何も検査されていない。
+const u1 = JSON.parse(body) as User;
+u1.email.toUpperCase(); // 💥 email が無ければ実行時クラッシュ。TS は「ある」と断言したのに
+
+// totalis: 境界で一度だけ実行時検査し、その後は型が真になる。
+const User = object({ id: string(), email: string() });
+const u2 = User.parse(JSON.parse(body)); // 形が違えば ValidationError を throw
+u2.email.toUpperCase(); // 安全 — キャストではなく検査が保証する
+```
+
+**Zod との比較 — スキーマがドメイン型から黙ってドリフトできない。** Zod では型は
+スキーマから *導出* されます（`z.infer`）。そのため手書きのドメイン型（共有パッケージ・
+コード生成・API 契約）を併用すると、スキーマが完全であり続ける保証がありません:
+
+```ts
+interface User { id: string; email: string; age: number }
+
+// Zod: 別個のドメイン型と、フィールドを忘れたスキーマが、両方ともコンパイルを通る。
+const ZUser = z.object({ id: z.string(), email: z.string() }); // 🙈 age が無い
+// z.infer<typeof ZUser> は { id, email } で、こっそり User ではない。
+// ずれはずっと後（あるいは永遠に気づかれず）、スキーマから離れた場所で表面化する。
+
+// totalis: 完全性をスキーマの定義時点で、フィールド単位のネイティブエラーで強制。
+const User = schemaFor<User>()({
+  id: string(),
+  email: string(),
+}); // ❌ コンパイルエラー: Property 'age' is missing in type '{ id: ...; email: ... }'
+```
+
+`User` にフィールドを足せば、それを検証すると謳う**すべての**スキーマが、更新するまで
+コンパイルを通らなくなります。（Zod も `schema satisfies z.ZodType<User>` で近いことは
+できますが、エラーが不透明で既定のワークフローでもありません。totalis ではこれが看板機能で、
+不足/誤りのフィールドを名指しします。）
+
+**Zod との比較 — 検証したことが型に刻まれるので、検証し忘れられない。** ブランド付き
+出力は、未検証の値を**コンパイル**エラーにします（実行時の不意打ちではなく）:
+
+```ts
+type Email = Branded<string, "Email">;
+const Email = string().brand<"Email">();
+declare function sendInvite(to: Email): void;
+
+sendInvite(Email.parse(input)); // ✅
+sendInvite(input);              // ❌ コンパイルエラー: 生の string は Email ではない
+```
+
+一般論で Zod に勝とうとはしていません（エコシステム・プラグイン・機能幅）。totalis は
+一点に賭けます — **全域性**: 実行時検査を境界に集約し、その先のあらゆる防御チェックを
+コンパイルエラーに置き換える。
 
 ### Standard Schema v1.0 対応
 
@@ -567,6 +720,38 @@ if (!result.success) {
   result.error.flatten(ja);
 }
 ```
+
+#### 何が・いつ失敗するか
+
+totalis は失敗を2種類に分けます。不正な**データ**は（検査を頼んだ）実行時に失敗し、
+不正な**スキーマ/使い方**はコンパイル時に失敗します（だから出荷されない）。
+
+```ts
+const User = schemaFor<{ id: string; tags: [string, ...string[]] }>()({
+  id: string(),
+  tags: array(string()).nonempty(),
+});
+
+// ── 実行時の失敗（境界での不正な「データ」）─────────────────────────────────
+User.parse({ id: 1, tags: ["a"] });        // throw: Expected string, received number at id
+User.parse({ id: "x", tags: [] });         // throw: Expected a non-empty array at tags
+User.safeParse({}).success;                // false — issues: [{code:"invalid_type", path:["id"]}, ...]
+int().parse(1.5);                          // throw: Expected an integer
+
+// ── コンパイル時の失敗（不正な「スキーマ/使い方」— 実行時に到達しない）─────────
+schemaFor<{ id: string; n: number }>()({ id: string() });
+//        ❌ Property 'n' is missing                     （不完全なスキーマ）
+schemaFor<{ email: Email }>()({ email: string() });
+//        ❌ string は Schema<Branded<string,"Email">> ではない（.brand<"Email">() が必要）
+objectCodec({ n: string().transform((s) => s.length) });
+//        ❌ transform フィールドは Codec ではない         （ラウンドトリップ不可）
+match(shape, "kind", { circle: (c) => c.radius });
+//        ❌ Property 'square' is missing                 （網羅的でない）
+const e: Email = "raw@example.com";
+//        ❌ string は Email に代入不可                    （検証を飛ばした）
+```
+
+目安: **実行時の値に依存するなら境界で throw、型だけに依存するならコンパイルが通らない。**
 
 ### 開発
 
