@@ -655,24 +655,52 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
 }
 
 // ---------------------------------------------------------------------------
-// Completeness primitive
+// Completeness API
+//
+// Promise 1: a schema cannot drift from the type it claims to validate. The
+// expected shape for `T` is "a schema decoding to each field of `T`", so a
+// missing field, an extra field, or a too-loose/wrong field all produce a
+// precise, NATIVE TypeScript error pointing at the offending key — no opaque
+// `& "Schema does not match T"` marker.
 // ---------------------------------------------------------------------------
 
-/** Strict (non-distributive) type equality. */
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+/**
+ * The shape a schema for `T` must have: for every key of `T` (optional keys
+ * included), a schema that DECODES to that field's type. The `unknown` input
+ * means the per-field schema may be a {@link codec} whose input representation
+ * differs from `T[K]`.
+ *
+ * Use it `satisfies`-style to check a shape while KEEPING its precise (possibly
+ * more-branded) field types:
+ *
+ * @example
+ *   const shape = {
+ *     id: string().brand<"UserId">(),
+ *     name: string(),
+ *   } satisfies SchemaFor<User>;
+ *   const user = object(shape);
+ *
+ * A plain `string()` where `T` expects `Branded<string, "Email">` fails to
+ * compile — the error names `Schema<Branded<string, "Email">, ...>`, guiding
+ * you to `.brand<"Email">()` instead of leaving you to guess.
+ */
+export type SchemaFor<T> = { [K in keyof T]-?: Schema<T[K], unknown> };
 
 /**
- * The completeness primitive: build an object schema that is GUARANTEED to
- * match the type `T` exactly. If the shape is missing a field, has an extra
- * field, or a field's type drifts, the call FAILS TO COMPILE.
+ * The completeness primitive: build an object schema GUARANTEED to match `T`.
+ * A missing field, an extra field, or a wrong/too-loose field fails to compile
+ * (pointing at the exact key), and the resulting schema's `Infer` is exactly
+ * `T`. For the `satisfies` style — which preserves more precise field types —
+ * use {@link SchemaFor} directly.
  *
  * @example
  *   interface User { name: string; age: number }
  *   const user = schemaFor<User>()({ name: string(), age: number() });
  */
 export function schemaFor<T>() {
-  return <S extends Shape>(
-    shape: Equals<InferShape<S>, T> extends true ? S : S & "Schema does not match T",
-  ): ObjectSchema<S> => new ObjectSchema(shape as S);
+  // The casts are internal only: `SchemaFor<T>` already guarantees the shape
+  // decodes to `T`, so the produced ObjectSchema decodes to exactly `T` (this
+  // is asserted at the type level in `completeness.test-d.ts`).
+  return (shape: SchemaFor<T>): Schema<T> =>
+    new ObjectSchema(shape as unknown as Shape) as unknown as Schema<T>;
 }

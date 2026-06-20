@@ -57,8 +57,10 @@ schemaFor<Account>()({
   email: string().brand<"Email">(),
 });
 
-// @ts-expect-error — a plain `string()` drifts from the branded domain type.
+// The error now points at the exact field (improved DX): a plain `string()`
+// drifts from the branded domain type `AccountId`.
 schemaFor<Account>()({
+  // @ts-expect-error — not assignable to Schema<Branded<string, "AccountId">>.
   id: string(),
   email: string().brand<"Email">(),
 });

@@ -102,7 +102,9 @@ spec at https://standardschema.dev before implementing.
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
   returns a discriminated `{ success: true; data } | { success: false; error }`.
-- `schemaFor<T>()` is the completeness primitive — extend its spirit everywhere.
+- `schemaFor<T>()` / `SchemaFor<T>` are the completeness primitives (native
+  per-field errors; `SchemaFor<T>` also works `satisfies`-style) — extend their
+  spirit everywhere.
 - **Standard Schema v1**: every schema implements `~standard`
   (`StandardSchemaV1<Input, Output>`, `validate` = the decode direction); the
   spec interface is vendored to keep the core dependency-free.
@@ -124,11 +126,15 @@ spec at https://standardschema.dev before implementing.
    + `transform-codec.test-d.ts`). Bidirectional codecs are the lightweight
    standalone alternative to Effect Schema. Next: object-level encode (a `codec`
    inside `object(...)` decodes today, but `ObjectSchema` itself is decode-only).
-3. **First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
-   `satisfies`-style helper and good error messages when a schema is incomplete
-   (the current `& "Schema does not match T"` trick is ugly — improve the DX).
-   Resolve the brand-vs-completeness ergonomics (a domain type using `Email`
-   should guide you to `.brand<"Email">()`, not just error).
+3. ~~**First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
+   `satisfies`-style helper and good error messages.~~ ✅ Done. The expected
+   shape is `SchemaFor<T> = { [K in keyof T]-?: Schema<T[K], unknown> }`, so
+   missing / extra / wrong / too-loose fields all produce NATIVE per-field
+   errors (no opaque `& "Schema does not match T"`). `SchemaFor<T>` doubles as
+   the `satisfies`-style helper (preserves precise field types and allows codec
+   fields). Brand ergonomics resolved: a plain `string()` where `T` wants
+   `Branded<string, "Email">` errors with the branded type named, guiding you
+   to `.brand<"Email">()`. (`completeness.test.ts` + `completeness.test-d.ts`.)
 5. Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type tests).
    Type-level correctness is the product, so it must be tested as rigorously as
    runtime behavior. (Seeded: `*.test-d.ts` validated by `tsc --noEmit`.)

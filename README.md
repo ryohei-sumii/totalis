@@ -125,11 +125,11 @@ const r = schema.safeParse({ user: { name: 42 } });
 // r.error.issues[0].path === ["user", "name"]
 ```
 
-#### Completeness: `schemaFor<T>()`
+#### Completeness: `schemaFor<T>()` and `SchemaFor<T>`
 
 This is the core differentiator. Build a schema that is **guaranteed** to match
-a type `T`. If a field is missing, extra, or its type drifts, the call **fails
-to compile**.
+a type `T`. A missing, extra, wrong, or too-loose field **fails to compile**
+with a **native, per-field error** that points at the exact key.
 
 ```ts
 import { schemaFor, string, number } from "totalis";
@@ -142,10 +142,26 @@ interface Account {
 const account = schemaFor<Account>()({
   id: string(),
   balance: number(),
-}); // ✅ compiles
+}); // ✅ compiles; Infer<typeof account> is exactly Account
 
-// If `Account` later gains `currency: string`, this stops compiling
-// until you add the field — your schema can no longer drift from the type.
+// If `Account` later gains `currency: string`, this stops compiling:
+//   Property 'currency' is missing in type '{ id: ...; balance: ... }'
+//   but required in type 'SchemaFor<Account>'.
+```
+
+Prefer the `satisfies` style when you want to **keep more precise field types**
+(brands, narrowed literals) on the schema. `SchemaFor<T>` is the helper, and it
+also accepts `codec` fields whose input differs from `T[K]`:
+
+```ts
+import { object, string, number, type SchemaFor } from "totalis";
+
+const shape = {
+  id: string().brand<"AccountId">(), // kept as a branded schema
+  balance: number(),
+} satisfies SchemaFor<Account>;
+
+const account = object(shape);
 ```
 
 #### Totality: make illegal states unrepresentable
@@ -354,11 +370,11 @@ const r = schema.safeParse({ user: { name: 42 } });
 // r.error.issues[0].path === ["user", "name"]
 ```
 
-#### 完全性: `schemaFor<T>()`
+#### 完全性: `schemaFor<T>()` と `SchemaFor<T>`
 
-これが核心の差別化要素です。型 `T` に一致することが**保証された**スキーマを
-作ります。フィールドの不足・余分・型のズレがあれば、その呼び出しは
-**コンパイルエラー**になります。
+これが核心の差別化要素です。型 `T` に一致することが**保証された**スキーマを作ります。
+フィールドの不足・余分・型のズレ・緩すぎる型があれば、**該当キーを名指しする
+フィールド単位のネイティブなエラー**で**コンパイルエラー**になります。
 
 ```ts
 import { schemaFor, string, number } from "totalis";
@@ -371,10 +387,26 @@ interface Account {
 const account = schemaFor<Account>()({
   id: string(),
   balance: number(),
-}); // ✅ コンパイルが通る
+}); // ✅ コンパイルが通る。Infer<typeof account> はちょうど Account
 
-// 後で `Account` に `currency: string` が増えると、フィールドを追加するまで
-// これはコンパイルが通らなくなる — スキーマが型から乖離できなくなる。
+// 後で `Account` に `currency: string` が増えると、こうなる:
+//   Property 'currency' is missing in type '{ id: ...; balance: ... }'
+//   but required in type 'SchemaFor<Account>'.
+```
+
+スキーマに**より精密な型**（ブランド・絞り込んだリテラル）を残したいときは
+`satisfies` スタイルを使います。ヘルパーが `SchemaFor<T>` で、`T[K]` と入力型が
+異なる `codec` フィールドも受け付けます。
+
+```ts
+import { object, string, number, type SchemaFor } from "totalis";
+
+const shape = {
+  id: string().brand<"AccountId">(), // ブランド付きのまま保持される
+  balance: number(),
+} satisfies SchemaFor<Account>;
+
+const account = object(shape);
 ```
 
 #### 全域性: 不正な状態を表現不能にする
