@@ -40,4 +40,10 @@ describe("unionFor covers a discriminated union exactly", () => {
     // @ts-expect-error — the "square" variant is not covered.
     unionFor<Shape>()("kind", [circle]);
   });
+
+  test("a variant not in the declared union fails to compile", () => {
+    const triangle = object({ kind: literal("triangle"), base: number() });
+    // @ts-expect-error — "triangle" is a variant not in Shape (UnionExtra).
+    unionFor<Shape>()("kind", [circle, square, triangle]);
+  });
 });

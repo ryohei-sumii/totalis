@@ -914,15 +914,22 @@ export function discriminatedUnion<K extends string, V extends ReadonlyArray<Var
 
 /** Accepts exactly the literal values it was built with (a closed enum). */
 class LiteralUnionSchema<T extends Literal> extends Codec<T> {
-  private readonly allowed: ReadonlySet<Literal>;
-
   constructor(readonly values: readonly T[]) {
     super();
-    this.allowed = new Set(values);
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T> {
-    if (this.allowed.has(input as Literal)) return ok(input as T);
+    for (const value of this.values) {
+      // Match by SameValueZero (so NaN matches), and return the CANONICAL stored
+      // member — mirroring LiteralSchema, so a declared `0` never echoes `-0`.
+      const matches =
+        value === input ||
+        (typeof value === "number" &&
+          Number.isNaN(value) &&
+          typeof input === "number" &&
+          Number.isNaN(input));
+      if (matches) return ok(value);
+    }
     const options = this.values.map((value) => JSON.stringify(value)).join(" | ");
     return fail(path, "invalid_value", { options, received: input });
   }
@@ -957,7 +964,7 @@ type UnionExtra<M> = { readonly "✗ union has a variant not in the declared typ
 export function enumFor<T extends Literal>() {
   return <const L extends readonly T[]>(
     values: L & ([Exclude<T, L[number]>] extends [never] ? unknown : EnumMissing<Exclude<T, L[number]>>),
-  ): Schema<T> => new LiteralUnionSchema<T>(values as readonly T[]) as unknown as Schema<T>;
+  ): Codec<T> => new LiteralUnionSchema<T>(values as readonly T[]);
 }
 
 /**
@@ -982,8 +989,7 @@ export function unionFor<T>() {
           ? unknown
           : UnionExtra<Exclude<Infer<V[number]>, T>>
         : UnionMissing<Exclude<T, Infer<V[number]>>>),
-  ): Schema<T> =>
-    new DiscriminatedUnionSchema<T>(key, variants as unknown as ReadonlyArray<ObjectSchema<Shape>>);
+  ): Schema<T> => discriminatedUnion(key, variants as V) as unknown as Schema<T>;
 }
 
 // ---------------------------------------------------------------------------

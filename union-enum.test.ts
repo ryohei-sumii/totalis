@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { enumFor, literal, number, object, unionFor } from "./totalis";
+import { enumFor, literal, number, object, objectCodec, unionFor } from "./totalis";
 
 describe("enumFor (exhaustive literal enum)", () => {
   type Role = "admin" | "user" | "guest";
@@ -19,6 +19,12 @@ describe("enumFor (exhaustive literal enum)", () => {
       expect(issue.code).toBe("invalid_value");
       expect(issue.message).toContain("admin");
     }
+  });
+
+  it("is an identity codec — usable as an objectCodec field that round-trips", () => {
+    const rec = objectCodec({ role: enumFor<"a" | "b">()(["a", "b"]) });
+    expect(rec.parse({ role: "a" })).toEqual({ role: "a" });
+    expect(rec.encode({ role: "b" })).toEqual({ role: "b" });
   });
 });
 
