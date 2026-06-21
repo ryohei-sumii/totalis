@@ -39,6 +39,14 @@ silently. `schemaFor<T>()` enforces a per-field **EXACT** match
 assignability-based checks structurally cannot express; do not try to win on
 breadth/perf/ecosystem.
 
+**Who it's for (positioning):** `use totalis when the type is the contract` —
+the domain type is authored ELSEWHERE (OpenAPI/GraphQL/Prisma codegen, a shared
+type package, a hand-maintained API contract) and the boundary validator must
+*provably* match it. That is exactly where Zod's infer-from-schema model is
+weakest. The living proof is `contract.test-d.ts`: regenerate the type (add a
+field / enum member / union variant) and the schema fails to compile until
+fixed. Keep that demo green and front-and-center.
+
 ### The thesis — one sentence
 
 > **You write the runtime check exactly once, at the boundary; in exchange the
