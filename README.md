@@ -223,6 +223,20 @@ number().positive().multipleOf(2);  // number
 // (for a branded integer type, use `int()` → number & Brand<"int">)
 ```
 
+Derive object schemas with `.pick` / `.omit` / `.partial` / `.extend` /
+`.merge` — `Infer` stays in lockstep with the matching type-level op, so a
+derived boundary schema can't drift from the derived type:
+
+```ts
+const User = object({ id: string(), name: string(), age: number() });
+
+User.pick(["id", "name"]); // Infer = { id: string; name: string }
+User.omit(["age"]);        // Infer = { id: string; name: string }
+User.partial();            // Infer = { id?: string; name?: string; age?: number }
+User.extend({ admin: boolean() });        // adds admin; a colliding key is overridden
+User.merge(object({ createdAt: string() })); // combines two object schemas
+```
+
 #### Parse values
 
 ```ts
@@ -698,6 +712,20 @@ string().regex(/^[a-z]+$/);         // string
 number().min(1).max(65535);         // number（ポート）
 number().positive().multipleOf(2);  // number
 // （ブランド付き整数型が欲しいときは int() → number & Brand<"int">）
+```
+
+オブジェクトスキーマは `.pick` / `.omit` / `.partial` / `.extend` / `.merge`
+で派生できます。`Infer` は対応する型レベル演算と常に一致するので、派生した境界
+スキーマが派生した型からドリフトすることはありません:
+
+```ts
+const User = object({ id: string(), name: string(), age: number() });
+
+User.pick(["id", "name"]); // Infer = { id: string; name: string }
+User.omit(["age"]);        // Infer = { id: string; name: string }
+User.partial();            // Infer = { id?: string; name?: string; age?: number }
+User.extend({ admin: boolean() });        // admin を追加。キー衝突時は上書き
+User.merge(object({ createdAt: string() })); // 2 つのオブジェクトスキーマを統合
 ```
 
 #### 値をパースする

@@ -938,6 +938,12 @@ export type InferShapeInput<S extends Shape> = Flatten<
   }
 >;
 
+/** Merge shape `E` over `S`, with `E`'s fields overriding `S`'s on key collision. */
+export type ExtendShape<S extends Shape, E extends Shape> = Flatten<Omit<S, keyof E> & E>;
+
+/** Wrap every field of `S` in {@link OptionalSchema}, so all keys become optional. */
+export type PartialShape<S extends Shape> = { [K in keyof S]: OptionalSchema<Infer<S[K]>> };
+
 /** Decode an object against `shape`, threading `path` and collecting issues. */
 function parseShape(
   shape: Shape,
@@ -968,6 +974,47 @@ export class ObjectSchema<S extends Shape> extends Schema<InferShape<S>> {
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<InferShape<S>> {
     return parseShape(this.shape, input, path) as Internal<InferShape<S>>;
+  }
+
+  /**
+   * Keep only the named fields. `Infer` of the result equals
+   * `Pick<Infer<this>, K>`, so the schema can never claim to validate a key it
+   * dropped.
+   */
+  pick<K extends keyof S>(keys: readonly K[]): ObjectSchema<Pick<S, K>> {
+    const out: Partial<S> = {};
+    for (const key of keys) out[key] = this.shape[key];
+    return new ObjectSchema(out as Pick<S, K>);
+  }
+
+  /** Drop the named fields — the dual of {@link pick}; `Infer` equals `Omit<Infer<this>, K>`. */
+  omit<K extends keyof S>(keys: readonly K[]): ObjectSchema<Omit<S, K>> {
+    const remove = new Set<keyof S>(keys);
+    const out: Shape = {};
+    for (const key of Object.keys(this.shape)) {
+      if (!remove.has(key as keyof S)) setKey(out, key, this.shape[key]);
+    }
+    return new ObjectSchema(out as unknown as Omit<S, K>);
+  }
+
+  /** Make every field optional — `Infer` equals `Partial<Infer<this>>`. */
+  partial(): ObjectSchema<PartialShape<S>> {
+    const out: Shape = {};
+    for (const key of Object.keys(this.shape)) {
+      const field = this.shape[key];
+      if (field) setKey(out, key, optional(field));
+    }
+    return new ObjectSchema(out as PartialShape<S>);
+  }
+
+  /** Add (or override) fields from `shape`; on a key collision the new field wins. */
+  extend<E extends Shape>(shape: E): ObjectSchema<ExtendShape<S, E>> {
+    return new ObjectSchema({ ...this.shape, ...shape } as ExtendShape<S, E>);
+  }
+
+  /** Merge another {@link ObjectSchema} in — `a.merge(b)` is `a.extend(b.shape)`. */
+  merge<O extends Shape>(other: ObjectSchema<O>): ObjectSchema<ExtendShape<S, O>> {
+    return this.extend(other.shape);
   }
 }
 

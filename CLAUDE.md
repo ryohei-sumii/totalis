@@ -127,8 +127,13 @@ spec at https://standardschema.dev before implementing.
   and return the same class (so they chain AND stay encodable; the type stays
   `string`/`number`, no brand): string `min`/`max`/`length`/`regex`/`email`/
   `url`/`uuid`, number `min`/`max`/`positive`/`nonnegative`/`multipleOf`.
-  Roadmap next: `coerce`, object utils (`pick`/`omit`/`partial`/...), then `lazy`
-  (recursive).
+  **Object utils** are methods on `ObjectSchema` that derive a new schema whose
+  `Infer` stays in lockstep with the corresponding type-level op (so a derived
+  boundary schema cannot drift from the derived type): `.pick(keys)` →
+  `Pick<…>`, `.omit(keys)` → `Omit<…>`, `.partial()` → `Partial<…>` (wraps each
+  field in `optional`), `.extend(shape)` (new fields override on collision) and
+  `.merge(other)` → `ExtendShape<…>`. Roadmap next: `coerce`, then `lazy`
+  (recursive) / `intersection`.
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
