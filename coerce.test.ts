@@ -29,6 +29,16 @@ describe("coerce.number", () => {
   });
 });
 
+describe("coerce never throws (safeParse contract) on throwing coercions", () => {
+  it("returns a failure instead of throwing on a symbol / bigint", () => {
+    // Number(symbol) and new Date(bigint) throw TypeError in JS.
+    expect(() => coerce.number().safeParse(Symbol("x"))).not.toThrow();
+    expect(coerce.number().safeParse(Symbol("x")).success).toBe(false);
+    expect(() => coerce.date().safeParse(10n)).not.toThrow();
+    expect(coerce.date().safeParse(10n).success).toBe(false);
+  });
+});
+
 describe("coerce.string", () => {
   it("coerces a number to its string form", () => {
     const r = coerce.string().safeParse(42);

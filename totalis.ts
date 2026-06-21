@@ -701,10 +701,18 @@ class CoerceSchema<O> extends Schema<O, unknown> {
   }
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<O> {
-    return this.base._parse(this.coerceFn(input), path);
+    let coerced: unknown;
+    try {
+      coerced = this.coerceFn(input);
+    } catch {
+      // JS coercion throws on some inputs (e.g. `Number(symbol)`,
+      // `new Date(bigint)`); `safeParse` must never throw, so report it as a
+      // normal failure instead of letting the exception escape.
+      return fail(path, "invalid_type", { expected: "coercible value", received: typeName(input) });
+    }
+    return this.base._parse(coerced, path);
   }
 }
-
 
 /** Literal primitive values that can be matched exactly. */
 type Literal = string | number | boolean | null;
