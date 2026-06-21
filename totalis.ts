@@ -119,7 +119,10 @@ export type IssueCode =
   | "invalid_type"
   | "invalid_literal"
   | "invalid_value"
+  | "invalid_string"
   | "too_small"
+  | "too_big"
+  | "not_multiple_of"
   | "invalid_union"
   | "custom";
 
@@ -264,6 +267,12 @@ function defaultMessage(code: IssueCode, params: Readonly<Record<string, unknown
       return `Expected one of ${String(params.options)}, received ${JSON.stringify(params.received)}`;
     case "too_small":
       return `Expected at least ${String(params.minimum)} item(s)`;
+    case "too_big":
+      return `Expected at most ${String(params.maximum)} item(s)`;
+    case "invalid_string":
+      return `Invalid ${String(params.validation)}`;
+    case "not_multiple_of":
+      return `Expected a multiple of ${String(params.multipleOf)}`;
     case "invalid_union":
       return "options" in params
         ? `Expected discriminant ${String(params.options)}, received ${JSON.stringify(params.received)}`
@@ -306,6 +315,31 @@ function setKey(target: Record<string, unknown>, key: string, value: unknown): v
   } else {
     target[key] = value;
   }
+}
+
+// A constructor-bearing global since Node 18 / browsers; declared so the core
+// needs neither the DOM lib nor `@types/node` (cf. `engines.node >= 20`).
+declare const URL: { new (url: string): unknown };
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function isUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A chainable runtime refinement on a primitive (string/number), kept as data. */
+interface Check<T> {
+  readonly run: (value: T) => boolean;
+  readonly code: IssueCode;
+  readonly params: Readonly<Record<string, unknown>>;
+  readonly message: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -465,14 +499,86 @@ export abstract class Codec<Output, Input = Output> extends Schema<Output, Input
 // ---------------------------------------------------------------------------
 
 class StringSchema extends Codec<string> {
+  constructor(private readonly checks: ReadonlyArray<Check<string>> = []) {
+    super();
+  }
+
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<string> {
-    return typeof input === "string"
-      ? ok(input)
-      : fail(path, "invalid_type", { expected: "string", received: typeName(input) });
+    if (typeof input !== "string") {
+      return fail(path, "invalid_type", { expected: "string", received: typeName(input) });
+    }
+    for (const c of this.checks) {
+      if (!c.run(input)) return fail(path, c.code, c.params, c.message);
+    }
+    return ok(input);
   }
 
   encode(value: string): string {
     return value;
+  }
+
+  // Refinements keep the type `string` (no brand) and stay encodable, so they
+  // chain (`string().min(3).email()`) and work inside objectCodec.
+  private and(check: Check<string>): StringSchema {
+    return new StringSchema([...this.checks, check]);
+  }
+
+  min(length: number): StringSchema {
+    return this.and({
+      run: (s) => s.length >= length,
+      code: "too_small",
+      params: { minimum: length, type: "string" },
+      message: `String must contain at least ${length} character(s)`,
+    });
+  }
+
+  max(length: number): StringSchema {
+    return this.and({
+      run: (s) => s.length <= length,
+      code: "too_big",
+      params: { maximum: length, type: "string" },
+      message: `String must contain at most ${length} character(s)`,
+    });
+  }
+
+  length(length: number): StringSchema {
+    return this.and({
+      run: (s) => s.length === length,
+      code: "invalid_string",
+      params: { validation: "length", length },
+      message: `String must contain exactly ${length} character(s)`,
+    });
+  }
+
+  regex(regex: RegExp, message = "Invalid format"): StringSchema {
+    return this.and({
+      run: (s) => regex.test(s),
+      code: "invalid_string",
+      params: { validation: "regex" },
+      message,
+    });
+  }
+
+  email(message = "Invalid email"): StringSchema {
+    return this.and({
+      run: (s) => EMAIL_REGEX.test(s),
+      code: "invalid_string",
+      params: { validation: "email" },
+      message,
+    });
+  }
+
+  url(message = "Invalid URL"): StringSchema {
+    return this.and({ run: isUrl, code: "invalid_string", params: { validation: "url" }, message });
+  }
+
+  uuid(message = "Invalid UUID"): StringSchema {
+    return this.and({
+      run: (s) => UUID_REGEX.test(s),
+      code: "invalid_string",
+      params: { validation: "uuid" },
+      message,
+    });
   }
 }
 
@@ -490,6 +596,10 @@ class DateSchema extends Codec<Date> {
 }
 
 class NumberSchema extends Codec<number> {
+  constructor(private readonly checks: ReadonlyArray<Check<number>> = []) {
+    super();
+  }
+
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<number> {
     if (typeof input !== "number") {
       return fail(path, "invalid_type", { expected: "number", received: typeName(input) });
@@ -497,11 +607,63 @@ class NumberSchema extends Codec<number> {
     if (Number.isNaN(input)) {
       return fail(path, "invalid_type", { expected: "number", received: "NaN" });
     }
+    for (const c of this.checks) {
+      if (!c.run(input)) return fail(path, c.code, c.params, c.message);
+    }
     return ok(input);
   }
 
   encode(value: number): number {
     return value;
+  }
+
+  private and(check: Check<number>): NumberSchema {
+    return new NumberSchema([...this.checks, check]);
+  }
+
+  min(value: number): NumberSchema {
+    return this.and({
+      run: (n) => n >= value,
+      code: "too_small",
+      params: { minimum: value, type: "number" },
+      message: `Number must be >= ${value}`,
+    });
+  }
+
+  max(value: number): NumberSchema {
+    return this.and({
+      run: (n) => n <= value,
+      code: "too_big",
+      params: { maximum: value, type: "number" },
+      message: `Number must be <= ${value}`,
+    });
+  }
+
+  positive(): NumberSchema {
+    return this.and({
+      run: (n) => n > 0,
+      code: "too_small",
+      params: { minimum: 0, exclusive: true, type: "number" },
+      message: "Number must be positive",
+    });
+  }
+
+  nonnegative(): NumberSchema {
+    return this.and({
+      run: (n) => n >= 0,
+      code: "too_small",
+      params: { minimum: 0, type: "number" },
+      message: "Number must be non-negative",
+    });
+  }
+
+  multipleOf(value: number): NumberSchema {
+    return this.and({
+      run: (n) => n % value === 0,
+      code: "not_multiple_of",
+      params: { multipleOf: value },
+      message: `Number must be a multiple of ${value}`,
+    });
   }
 }
 

@@ -122,8 +122,12 @@ spec at https://standardschema.dev before implementing.
   (non-discriminated, first-match), `.nullable()` / `nullable(s)` (`T | null`;
   the `.nullable()` method preserves codec encodability, like `.optional()`),
   `date()`, `record(value)` (`Record<string, V>`), `tuple([...])` (fixed-length,
-  `const` inference + `-readonly` → mutable tuple). Roadmap next: string/number
-  refinements + `coerce`, object utils (`pick`/`omit`/`partial`/...), then `lazy`
+  `const` inference + `-readonly` → mutable tuple). String/number **refinements**
+  are chainable methods on `StringSchema`/`NumberSchema` that carry a `Check[]`
+  and return the same class (so they chain AND stay encodable; the type stays
+  `string`/`number`, no brand): string `min`/`max`/`length`/`regex`/`email`/
+  `url`/`uuid`, number `min`/`max`/`positive`/`nonnegative`/`multipleOf`.
+  Roadmap next: `coerce`, object utils (`pick`/`omit`/`partial`/...), then `lazy`
   (recursive).
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
