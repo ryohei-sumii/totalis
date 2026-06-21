@@ -817,6 +817,63 @@ export class ObjectCodec<S extends EncodableShape> extends Codec<
   }
 }
 
+/** A dictionary with arbitrary string keys, every value validated by one schema. */
+class RecordSchema<V> extends Schema<Record<string, V>> {
+  constructor(readonly value: Schema<V>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Record<string, V>> {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+      return fail(path, "invalid_type", { expected: "object", received: typeName(input) });
+    }
+    const record = input as Record<string, unknown>;
+    const out: Record<string, V> = {};
+    const issues: Issue[] = [];
+    for (const key of Object.keys(record)) {
+      const result = this.value._parse(record[key], [...path, key]);
+      if (result.ok) out[key] = result.value;
+      else issues.push(...result.issues);
+    }
+    return issues.length > 0 ? { ok: false, issues } : ok(out);
+  }
+}
+
+/** Map a tuple of schemas to the (mutable) tuple of their output types. */
+export type InferTuple<T extends ReadonlyArray<Schema<unknown>>> = {
+  -readonly [I in keyof T]: T[I] extends Schema<infer O> ? O : never;
+};
+
+/** A fixed-length, positional tuple. */
+class TupleSchema<T extends ReadonlyArray<Schema<unknown>>> extends Schema<InferTuple<T>> {
+  constructor(readonly items: T) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<InferTuple<T>> {
+    if (!Array.isArray(input)) {
+      return fail(path, "invalid_type", { expected: "array", received: typeName(input) });
+    }
+    const arr = input as unknown[];
+    if (arr.length !== this.items.length) {
+      return fail(path, "invalid_type", {
+        expected: `tuple of length ${this.items.length}`,
+        received: `array of length ${arr.length}`,
+      });
+    }
+    const out: unknown[] = [];
+    const issues: Issue[] = [];
+    for (let i = 0; i < this.items.length; i++) {
+      const schema = this.items[i];
+      if (!schema) continue;
+      const result = schema._parse(arr[i], [...path, i]);
+      if (result.ok) out.push(result.value);
+      else issues.push(...result.issues);
+    }
+    return issues.length > 0 ? { ok: false, issues } : ok(out as InferTuple<T>);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
@@ -853,6 +910,18 @@ export function nullable<T, Input>(schema: Schema<T, Input>): Schema<T | null, I
 
 export function array<T>(element: Schema<T>): ArraySchema<T> {
   return new ArraySchema(element);
+}
+
+/** A dictionary `Record<string, V>` — arbitrary string keys, each value validated by `value`. */
+export function record<V>(value: Schema<V>): Schema<Record<string, V>> {
+  return new RecordSchema(value);
+}
+
+/** A fixed-length positional tuple — `tuple([string(), number()])` → `[string, number]`. */
+export function tuple<const T extends ReadonlyArray<Schema<unknown>>>(
+  items: T,
+): Schema<InferTuple<T>> {
+  return new TupleSchema<T>(items);
 }
 
 export function object<S extends Shape>(shape: S): ObjectSchema<S> {

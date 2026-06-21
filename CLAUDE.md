@@ -120,9 +120,11 @@ spec at https://standardschema.dev before implementing.
 - **Breadth** (filling the type catalog without diluting the thesis — each new
   type keeps `Infer` exact, no `any`, and works under `schemaFor`): `union([...])`
   (non-discriminated, first-match), `.nullable()` / `nullable(s)` (`T | null`;
-  the `.nullable()` method preserves codec encodability, like `.optional()`).
-  Roadmap next: `record` / `tuple`, string/number refinements + `coerce`, object
-  utils (`pick`/`omit`/`partial`/...), then `lazy` (recursive).
+  the `.nullable()` method preserves codec encodability, like `.optional()`),
+  `date()`, `record(value)` (`Record<string, V>`), `tuple([...])` (fixed-length,
+  `const` inference + `-readonly` → mutable tuple). Roadmap next: string/number
+  refinements + `coerce`, object utils (`pick`/`omit`/`partial`/...), then `lazy`
+  (recursive).
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`

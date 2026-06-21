@@ -194,16 +194,19 @@ type User = Infer<typeof user>;
 Note: a field whose schema admits `undefined` becomes an **optional key**
 (`nickname?: string`), not `nickname: string | undefined`.
 
-More building blocks: `date()`, `s.nullable()` / `nullable(s)` (`T | null`), and
-`union([a, b])` (non-discriminated, first match):
+More building blocks: `date()`, `s.nullable()` / `nullable(s)` (`T | null`),
+`union([a, b])` (non-discriminated, first match), `record(v)`
+(`Record<string, V>`), and `tuple([a, b])` (`[A, B]`):
 
 ```ts
-import { object, string, number, date, union } from "totalis";
+import { object, string, number, date, union, record, tuple } from "totalis";
 
 const row = object({
-  note: string().nullable(),       // string | null
-  value: union([string(), number()]), // string | number
-  createdAt: date(),               // Date
+  note: string().nullable(),           // string | null
+  value: union([string(), number()]),  // string | number
+  createdAt: date(),                    // Date
+  counts: record(number()),            // Record<string, number>
+  point: tuple([number(), number()]),  // [number, number]
 });
 ```
 
@@ -657,15 +660,18 @@ type User = Infer<typeof user>;
 なります。
 
 その他の部品: `date()`、`s.nullable()` / `nullable(s)`（`T | null`）、
-`union([a, b])`（非判別・先勝ち）:
+`union([a, b])`（非判別・先勝ち）、`record(v)`（`Record<string, V>`）、
+`tuple([a, b])`（`[A, B]`）:
 
 ```ts
-import { object, string, number, date, union } from "totalis";
+import { object, string, number, date, union, record, tuple } from "totalis";
 
 const row = object({
   note: string().nullable(),           // string | null
   value: union([string(), number()]),  // string | number
   createdAt: date(),                    // Date
+  counts: record(number()),            // Record<string, number>
+  point: tuple([number(), number()]),  // [number, number]
 });
 ```
 
