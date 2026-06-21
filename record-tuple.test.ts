@@ -21,6 +21,16 @@ describe("record", () => {
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues[0]!.path).toEqual(["b"]);
   });
+
+  it("stores a '__proto__' key as data without polluting the prototype", () => {
+    // JSON.parse produces an OWN "__proto__" key — a plain `out[key] = v` would
+    // hit the prototype setter (drop the data / change the prototype).
+    const parsed = record(number()).parse(JSON.parse('{"__proto__": 1, "ok": 2}'));
+    expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype); // not polluted
+    expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(true);
+    expect((parsed as Record<string, number>)["__proto__"]).toBe(1); // kept as data
+    expect(parsed.ok).toBe(2);
+  });
 });
 
 describe("tuple", () => {

@@ -288,6 +288,26 @@ function typeName(value: unknown): string {
   return typeof value;
 }
 
+/**
+ * Assign a parsed value onto an output object by key. Guards `"__proto__"`:
+ * a plain `out[key] = value` for that key hits Object.prototype's setter
+ * (changing the prototype and dropping the data, since the input key is
+ * attacker-controlled in `record`). `defineProperty` stores it as an own data
+ * property instead — so the output never lies and the prototype isn't polluted.
+ */
+function setKey(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === "__proto__") {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  } else {
+    target[key] = value;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Schema base
 // ---------------------------------------------------------------------------
@@ -769,7 +789,7 @@ function parseShape(
     const present = key in record;
     const result = schema._parse(record[key], [...path, key]);
     if (!result.ok) issues.push(...result.issues);
-    else if (present || result.value !== undefined) out[key] = result.value;
+    else if (present || result.value !== undefined) setKey(out, key, result.value);
   }
   return issues.length > 0 ? { ok: false, issues } : ok(out);
 }
@@ -832,7 +852,7 @@ class RecordSchema<V> extends Schema<Record<string, V>> {
     const issues: Issue[] = [];
     for (const key of Object.keys(record)) {
       const result = this.value._parse(record[key], [...path, key]);
-      if (result.ok) out[key] = result.value;
+      if (result.ok) setKey(out, key, result.value);
       else issues.push(...result.issues);
     }
     return issues.length > 0 ? { ok: false, issues } : ok(out);
