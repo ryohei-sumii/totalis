@@ -722,9 +722,17 @@ class CoerceSchema<O> extends Schema<O, unknown> {
  * `Schema<Category>`, so the schema still cannot drift from the type — and
  * wrapping `schemaFor<Category>()({...})` inside keeps the EXACT per-field
  * guarantee. The getter is memoized, so the recursive schema is built once.
+ *
+ * Because `lazy` lets the INPUT drive recursion depth, a cyclic input would
+ * otherwise recurse forever; `_parse` detects a cycle (an input that is its own
+ * ancestor) and returns a normal failure, so `safeParse` keeps its no-throw
+ * contract. A non-cyclic shared reference (a DAG) is fine — the guard is
+ * stack-disciplined (cleared on the way back up), so it only flags ancestors.
  */
 class LazySchema<O, I> extends Schema<O, I> {
   private cached: Schema<O, I> | undefined;
+  /** Object inputs currently on this schema's parse stack (ancestors). */
+  private readonly inProgress = new WeakSet<object>();
 
   constructor(private readonly getter: () => Schema<O, I>) {
     super();
@@ -732,7 +740,22 @@ class LazySchema<O, I> extends Schema<O, I> {
 
   _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<O> {
     this.cached ??= this.getter();
-    return this.cached._parse(input, path);
+    // Only objects can form a cycle; primitives parse directly.
+    if (typeof input !== "object" || input === null) {
+      return this.cached._parse(input, path);
+    }
+    if (this.inProgress.has(input)) {
+      return fail(path, "invalid_type", {
+        expected: "a finite (non-circular) value",
+        received: "circular reference",
+      });
+    }
+    this.inProgress.add(input);
+    try {
+      return this.cached._parse(input, path);
+    } finally {
+      this.inProgress.delete(input);
+    }
   }
 }
 

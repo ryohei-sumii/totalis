@@ -270,6 +270,10 @@ const Category: Schema<Category> = lazy(() =>
 // lazy(() => schemaFor<Category>()({ name: string(), subcategories: array(Category) }))
 ```
 
+A recursive schema is cycle-safe: a cyclic input returns a normal failure
+(`safeParse` never throws), while a non-cyclic shared reference (a DAG) still
+validates.
+
 #### Parse values
 
 ```ts
@@ -793,6 +797,9 @@ const Category: Schema<Category> = lazy(() =>
 // EXACT な per-field チェックが欲しければ lazy の中で schemaFor を使う:
 // lazy(() => schemaFor<Category>()({ name: string(), subcategories: array(Category) }))
 ```
+
+再帰スキーマは循環安全です: 循環した入力は通常の失敗を返し（`safeParse` は
+throw しない）、非循環の共有参照（DAG）はそのまま検証されます。
 
 #### 値をパースする
 

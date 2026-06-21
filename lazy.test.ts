@@ -77,4 +77,22 @@ describe("lazy (recursive schemas)", () => {
     expect(Inner.safeParse({ n: 1 }).success).toBe(true);
     expect(Inner.safeParse({ n: "x" }).success).toBe(false);
   });
+
+  it("returns a failure (never throws) on a cyclic input", () => {
+    const a: { name: string; subcategories: unknown[] } = { name: "x", subcategories: [] };
+    a.subcategories.push(a); // a is its own descendant
+    expect(() => Category.safeParse(a)).not.toThrow();
+    const r = Category.safeParse(a);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.params).toMatchObject({ received: "circular reference" });
+    }
+  });
+
+  it("accepts a non-cyclic shared reference (DAG), not just a tree", () => {
+    // `shared` appears twice as a sibling — not a cycle — so it must validate.
+    const shared = { name: "shared", subcategories: [] };
+    const root = { name: "root", subcategories: [shared, shared] };
+    expect(Category.safeParse(root).success).toBe(true);
+  });
 });

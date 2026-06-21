@@ -145,7 +145,12 @@ spec at https://standardschema.dev before implementing.
   (`const Category: Schema<Category> = lazy(...)`); the getter must then return
   `Schema<Category>`, so the schema can't drift from the type — and wrapping
   `schemaFor<Category>()({...})` inside `lazy` keeps the EXACT per-field
-  guarantee. Roadmap next: `intersection`.
+  guarantee. Cycle-safe: since `lazy` lets the input drive recursion depth,
+  `LazySchema._parse` detects a cyclic input (an input that is its own ancestor,
+  via a stack-disciplined `WeakSet`) and returns a normal failure instead of
+  overflowing the stack, so `safeParse` keeps its no-throw contract (a
+  non-cyclic shared reference / DAG still validates). Roadmap next:
+  `intersection`.
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
