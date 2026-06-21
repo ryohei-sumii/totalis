@@ -237,6 +237,20 @@ User.extend({ admin: boolean() });        // adds admin; a colliding key is over
 User.merge(object({ createdAt: string() })); // combines two object schemas
 ```
 
+Coerce loose input at the boundary with `coerce`. It is decode-only (its
+`InferInput` is honestly `unknown`, never the output type) — pass a refined or
+branded base to keep narrowing:
+
+```ts
+coerce.number();                 // Schema<number, unknown> — "42" -> 42
+coerce.number(number().min(1));  // coerces, then runs min
+coerce.number(int());            // Schema<Integer, unknown> — brand preserved
+coerce.date();                   // "2026-01-01" -> Date
+
+// Like transform, a coerced field is not invertible, so it can't enter objectCodec:
+// objectCodec({ n: coerce.number() }); // ✗ compile error
+```
+
 #### Parse values
 
 ```ts
@@ -726,6 +740,20 @@ User.omit(["age"]);        // Infer = { id: string; name: string }
 User.partial();            // Infer = { id?: string; name?: string; age?: number }
 User.extend({ admin: boolean() });        // admin を追加。キー衝突時は上書き
 User.merge(object({ createdAt: string() })); // 2 つのオブジェクトスキーマを統合
+```
+
+境界での緩い入力は `coerce` で強制変換できます。decode 専用で（`InferInput` は
+出力型ではなく正直に `unknown`）、絞り込み済み・ブランド付きのベースを渡せば
+そのまま絞り込みも維持されます:
+
+```ts
+coerce.number();                 // Schema<number, unknown> — "42" -> 42
+coerce.number(number().min(1));  // 変換してから min を実行
+coerce.number(int());            // Schema<Integer, unknown> — ブランドを保持
+coerce.date();                   // "2026-01-01" -> Date
+
+// transform と同様、強制変換は非可逆なので objectCodec には入れられません:
+// objectCodec({ n: coerce.number() }); // ✗ コンパイルエラー
 ```
 
 #### 値をパースする
