@@ -210,6 +210,19 @@ const row = object({
 });
 ```
 
+Chainable refinements narrow at runtime but keep the type `string` / `number`
+(use `.brand()` if you want a distinct type), so they compose and stay
+encodable:
+
+```ts
+string().min(1).max(80);            // string
+string().email();                   // string
+string().regex(/^[a-z]+$/);         // string
+number().min(1).max(65535);         // number  (a port)
+number().positive().multipleOf(2);  // number
+// (for a branded integer type, use `int()` → number & Brand<"int">)
+```
+
 #### Parse values
 
 ```ts
@@ -673,6 +686,18 @@ const row = object({
   counts: record(number()),            // Record<string, number>
   point: tuple([number(), number()]),  // [number, number]
 });
+```
+
+連鎖可能な絞り込み（refinement）は実行時に絞るだけで型は `string` / `number` の
+まま（別の型にしたいなら `.brand()`）。だから合成でき、encodability も保たれます:
+
+```ts
+string().min(1).max(80);            // string
+string().email();                   // string
+string().regex(/^[a-z]+$/);         // string
+number().min(1).max(65535);         // number（ポート）
+number().positive().multipleOf(2);  // number
+// （ブランド付き整数型が欲しいときは int() → number & Brand<"int">）
 ```
 
 #### 値をパースする
