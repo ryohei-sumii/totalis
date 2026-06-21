@@ -1,25 +1,44 @@
 {
   "name": "totalis",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A TypeScript-first runtime validation library where your schema can never drift from your type.",
   "license": "MIT",
   "type": "module",
-  "main": "totalis.ts",
-  "types": "totalis.ts",
+  "sideEffects": false,
+  "main": "./dist/totalis.cjs",
+  "module": "./dist/totalis.js",
+  "types": "./dist/totalis.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/totalis.d.ts",
+        "default": "./dist/totalis.js"
+      },
+      "require": {
+        "types": "./dist/totalis.d.cts",
+        "default": "./dist/totalis.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=20",
     "pnpm": ">=10"
   },
   "files": [
-    "totalis.ts"
+    "dist"
   ],
   "scripts": {
     "preinstall": "npx only-allow pnpm",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:types": "vitest run --typecheck.only",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build": "tsup",
+    "check:exports": "attw --pack .",
+    "check:publish": "publint",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:publish && pnpm run check:exports"
   },
   "keywords": [
     "validation",
@@ -30,7 +49,10 @@
     "exhaustiveness"
   ],
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
     "@standard-schema/spec": "^1.1.0",
+    "publint": "^0.3.14",
+    "tsup": "^8.5.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }
