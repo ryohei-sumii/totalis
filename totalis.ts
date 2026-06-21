@@ -847,6 +847,51 @@ export function codec<Input, Output>(
   return new MappedCodec(base, transform.decode, transform.encode);
 }
 
+/** Surfaced when the base schema doesn't decode EXACTLY to the declared `Encoded` type. */
+type EncodedMismatch<Encoded> = {
+  readonly "✗ base must decode EXACTLY to the declared Encoded type": Encoded;
+};
+
+/**
+ * Build a {@link Codec} that pins both ends of a serialization boundary to
+ * independently-declared contract types: `Decoded` (your domain model) and
+ * `Encoded` (the wire format). The `base` schema must validate the wire format
+ * EXACTLY as `Encoded` — its inferred type must *equal* `Encoded` (`Equals`,
+ * not mere assignability) — so a too-narrow base, or a drift in the wire
+ * contract, fails to compile. `decode` / `encode` are then type-checked in both
+ * directions against `Encoded` and `Decoded`.
+ *
+ * (The exact, drift-proof check is on the `Encoded`/wire side — the side with a
+ * schema to verify. The `Decoded` side is the declared output type of `decode`,
+ * type-safe but not separately verified, since `decode` is an arbitrary
+ * function.)
+ *
+ * This is the wedge Zod's `z.codec` cannot express: Zod infers the input type
+ * from the base schema, so it cannot verify the base against an independently-
+ * authored `Encoded` contract.
+ *
+ * @example
+ *   interface WireUser { createdAt: string }   // from the API contract
+ *   interface User { createdAt: Date }          // your domain model
+ *   const User = codecFor<User, WireUser>()(
+ *     schemaFor<WireUser>()({ createdAt: string() }),
+ *     {
+ *       decode: (w) => ({ createdAt: new Date(w.createdAt) }),
+ *       encode: (u) => ({ createdAt: u.createdAt.toISOString() }),
+ *     },
+ *   );
+ */
+export function codecFor<Decoded, Encoded>() {
+  // base is constrained to Schema<Encoded, Encoded> (a plain validator of the
+  // wire format) — NOT Schema<Encoded, unknown> — so a transforming codec base
+  // (whose INPUT differs from Encoded) is rejected; otherwise the produced
+  // codec's InferInput would lie about what `parse` actually accepts.
+  return <B extends Schema<Encoded, Encoded>>(
+    base: B & (Equals<Infer<B>, Encoded> extends true ? unknown : EncodedMismatch<Encoded>),
+    transform: { decode: (input: Encoded) => Decoded; encode: (output: Decoded) => Encoded },
+  ): Codec<Decoded, Encoded> => codec(base as Schema<Encoded>, transform);
+}
+
 // ---------------------------------------------------------------------------
 // Exhaustive discriminated unions
 //

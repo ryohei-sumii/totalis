@@ -359,6 +359,27 @@ const e = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" }); // { id: st
 Event.encode(e); // { id: string; at: string }  — the whole object round-trips
 ```
 
+When **both** ends of a serialization boundary are declared types (a wire DTO
+and a domain model, both from codegen), `codecFor<Decoded, Encoded>()` pins the
+codec to both — and the base must decode **exactly** to `Encoded`, so a drift in
+either contract fails to compile. Zod's `z.codec` infers the input from the
+base, so it can't check it against an independently-authored `Encoded`:
+
+```ts
+import { codecFor, object, string } from "totalis";
+
+interface WireUser { createdAt: string } // the API contract
+interface User { createdAt: Date }        // your domain model
+
+const User = codecFor<User, WireUser>()(object({ createdAt: string() }), {
+  decode: (w) => ({ createdAt: new Date(w.createdAt) }),
+  encode: (u) => ({ createdAt: u.createdAt.toISOString() }),
+});
+User.parse({ createdAt: "2026-06-20T00:00:00.000Z" }); // { createdAt: Date }
+User.encode({ createdAt: new Date(0) });               // { createdAt: string }
+// change WireUser and the base no longer decodes exactly to it → ❌ compile error
+```
+
 Codecs are the lightweight, standalone answer to Effect Schema's bidirectional
 transforms — without pulling in a runtime.
 
@@ -785,6 +806,27 @@ import { objectCodec, string } from "totalis";
 const Event = objectCodec({ id: string(), at: isoDate });
 const e = Event.parse({ id: "e1", at: "2026-06-20T00:00:00.000Z" }); // { id: string; at: Date }
 Event.encode(e); // { id: string; at: string } — オブジェクト全体がラウンドトリップ
+```
+
+シリアライズ境界の**両端**が宣言済みの型（ワイヤ DTO とドメインモデル、両方とも
+コード生成）のときは、`codecFor<Decoded, Encoded>()` が codec を両端に固定します。
+base は `Encoded` に**厳密に**デコードしなければならず、どちらの契約がドリフトしても
+コンパイルエラー。Zod の `z.codec` は base から入力型を infer するので、独立宣言した
+`Encoded` に対して検査できません:
+
+```ts
+import { codecFor, object, string } from "totalis";
+
+interface WireUser { createdAt: string } // API 契約
+interface User { createdAt: Date }        // ドメインモデル
+
+const User = codecFor<User, WireUser>()(object({ createdAt: string() }), {
+  decode: (w) => ({ createdAt: new Date(w.createdAt) }),
+  encode: (u) => ({ createdAt: u.createdAt.toISOString() }),
+});
+User.parse({ createdAt: "2026-06-20T00:00:00.000Z" }); // { createdAt: Date }
+User.encode({ createdAt: new Date(0) });               // { createdAt: string }
+// WireUser を変えると base が厳密一致しなくなる → ❌ コンパイルエラー
 ```
 
 codec は、Effect Schema の双方向変換に対する「ランタイムを引き込まない、単体で
