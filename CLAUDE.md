@@ -116,7 +116,12 @@ spec at https://standardschema.dev before implementing.
   with a type-safe `.encode(output): input`. Transformed schemas are decode-only
   by design — there is no `encode` to call.
 - Primitives: string / number / boolean / literal (literal uses `const L` to
-  preserve literal types).
+  preserve literal types) / date (identity codec, rejects `NaN`-time Dates).
+- **Breadth** (filling the type catalog without diluting the thesis — each new
+  type keeps `Infer` exact, no `any`, and works under `schemaFor`): `union([...])`
+  (non-discriminated, first-match), `.nullable()` / `nullable(s)` (`T | null`,
+  decode-only). Roadmap next: `record` / `tuple`, string/number refinements +
+  `coerce`, object utils (`pick`/`omit`/`partial`/...), then `lazy` (recursive).
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`

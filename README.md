@@ -194,6 +194,19 @@ type User = Infer<typeof user>;
 Note: a field whose schema admits `undefined` becomes an **optional key**
 (`nickname?: string`), not `nickname: string | undefined`.
 
+More building blocks: `date()`, `s.nullable()` / `nullable(s)` (`T | null`), and
+`union([a, b])` (non-discriminated, first match):
+
+```ts
+import { object, string, number, date, union } from "totalis";
+
+const row = object({
+  note: string().nullable(),       // string | null
+  value: union([string(), number()]), // string | number
+  createdAt: date(),               // Date
+});
+```
+
 #### Parse values
 
 ```ts
@@ -642,6 +655,19 @@ type User = Infer<typeof user>;
 ポイント: `undefined` を許容するスキーマのフィールドは、
 `nickname: string | undefined` ではなく**任意キー**（`nickname?: string`）に
 なります。
+
+その他の部品: `date()`、`s.nullable()` / `nullable(s)`（`T | null`）、
+`union([a, b])`（非判別・先勝ち）:
+
+```ts
+import { object, string, number, date, union } from "totalis";
+
+const row = object({
+  note: string().nullable(),           // string | null
+  value: union([string(), number()]),  // string | number
+  createdAt: date(),                    // Date
+});
+```
 
 #### 値をパースする
 
