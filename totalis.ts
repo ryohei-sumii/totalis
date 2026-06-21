@@ -317,6 +317,30 @@ function setKey(target: Record<string, unknown>, key: string, value: unknown): v
   }
 }
 
+/** A non-null, non-array object — the only shape that can be merged field-wise. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Deep-merge two successfully-parsed values for an {@link IntersectionSchema}.
+ * Each side's object schema strips keys it doesn't declare, so a plain object
+ * is rebuilt key-by-key from BOTH sides (recursing where a key is shared and
+ * both values are objects). Non-objects come from validating the same input on
+ * both sides, so they are already equal — the right value is returned. Uses
+ * {@link setKey} + own-key checks so a `"__proto__"` data key can't pollute.
+ */
+function mergeIntersection(a: unknown, b: unknown): unknown {
+  if (!isPlainObject(a) || !isPlainObject(b)) return b;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(a)) setKey(out, key, a[key]);
+  for (const key of Object.keys(b)) {
+    const sharedWithA = Object.prototype.hasOwnProperty.call(a, key);
+    setKey(out, key, sharedWithA ? mergeIntersection(a[key], b[key]) : b[key]);
+  }
+  return out;
+}
+
 // A constructor-bearing global since Node 18 / browsers; declared so the core
 // needs neither the DOM lib nor `@types/node` (cf. `engines.node >= 20`).
 declare const URL: { new (url: string): unknown };
@@ -1183,6 +1207,30 @@ class TupleSchema<T extends ReadonlyArray<Schema<unknown>>> extends Schema<Infer
   }
 }
 
+/**
+ * Validate against BOTH schemas and deep-merge the results — the runtime side
+ * of `A & B`. Decode-only (a plain {@link Schema}, not a {@link Codec}):
+ * encoding an intersection is ambiguous, so it isn't supported, like
+ * `transform`. Issues from both sides are reported together.
+ */
+class IntersectionSchema<A, B> extends Schema<A & B> {
+  constructor(
+    private readonly left: Schema<A>,
+    private readonly right: Schema<B>,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<A & B> {
+    const a = this.left._parse(input, path);
+    const b = this.right._parse(input, path);
+    if (!a.ok || !b.ok) {
+      return { ok: false, issues: [...(a.ok ? [] : a.issues), ...(b.ok ? [] : b.issues)] };
+    }
+    return ok(mergeIntersection(a.value, b.value) as A & B);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
@@ -1244,6 +1292,21 @@ export function tuple<const T extends ReadonlyArray<Schema<unknown>>>(
   items: T,
 ): Schema<InferTuple<T>> {
   return new TupleSchema<T>(items);
+}
+
+/**
+ * Validate against both `left` and `right`, producing `A & B` — input must
+ * satisfy both schemas, and (for objects) the parsed result carries the fields
+ * of both. Useful for combining independent contracts; for two object schemas
+ * you control, `a.merge(b)` / `a.extend(...)` is usually clearer.
+ *
+ * @example
+ *   const Entity = object({ id: string() });
+ *   const Timestamped = object({ createdAt: date() });
+ *   const Row = intersection(Entity, Timestamped); // { id: string } & { createdAt: Date }
+ */
+export function intersection<A, B>(left: Schema<A>, right: Schema<B>): Schema<A & B> {
+  return new IntersectionSchema(left, right);
 }
 
 export function object<S extends Shape>(shape: S): ObjectSchema<S> {

@@ -274,6 +274,17 @@ A recursive schema is cycle-safe: a cyclic input returns a normal failure
 (`safeParse` never throws), while a non-cyclic shared reference (a DAG) still
 validates.
 
+Combine two contracts with `intersection` (`A & B`). Input must satisfy both,
+and the parsed result carries the fields of both (shared object-valued keys are
+deep-merged):
+
+```ts
+const Entity = object({ id: string() });
+const Timestamped = object({ createdAt: date() });
+const Row = intersection(Entity, Timestamped); // { id: string } & { createdAt: Date }
+// For two object schemas you own, `Entity.merge(Timestamped)` is usually clearer.
+```
+
 #### Parse values
 
 ```ts
@@ -800,6 +811,17 @@ const Category: Schema<Category> = lazy(() =>
 
 再帰スキーマは循環安全です: 循環した入力は通常の失敗を返し（`safeParse` は
 throw しない）、非循環の共有参照（DAG）はそのまま検証されます。
+
+2 つの契約は `intersection`（`A & B`）で結合できます。入力は両方を満たす必要が
+あり、パース結果は両方のフィールドを持ちます（共有するオブジェクト値のキーは
+ディープマージされます）:
+
+```ts
+const Entity = object({ id: string() });
+const Timestamped = object({ createdAt: date() });
+const Row = intersection(Entity, Timestamped); // { id: string } & { createdAt: Date }
+// 自分で持っている 2 つの object スキーマなら Entity.merge(Timestamped) の方が明快。
+```
 
 #### 値をパースする
 
