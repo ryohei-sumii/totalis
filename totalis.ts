@@ -336,7 +336,7 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
     return new OptionalSchema<Output, Input>(this);
   }
 
-  /** Make this schema also accept `null` (decode-only — returns a plain `Schema`). */
+  /** Make this schema also accept `null`, producing `T | null` (a {@link Codec} stays encodable). */
   nullable(): Schema<Output | null, Input | null> {
     return new NullableSchema<Output, Input>(this);
   }
@@ -432,6 +432,11 @@ export abstract class Codec<Output, Input = Output> extends Schema<Output, Input
   /** Accept `undefined` while staying encodable. */
   override optional(): Codec<Output | undefined, Input | undefined> {
     return new OptionalCodec<Output, Input>(this);
+  }
+
+  /** Accept `null` while staying encodable. */
+  override nullable(): Codec<Output | null, Input | null> {
+    return new NullableCodec<Output, Input>(this);
   }
 }
 
@@ -592,6 +597,20 @@ class OptionalCodec<T, Input> extends Codec<T | undefined, Input | undefined> {
 
   encode(value: T | undefined): Input | undefined {
     return value === undefined ? undefined : this.inner.encode(value);
+  }
+}
+
+class NullableCodec<T, Input> extends Codec<T | null, Input | null> {
+  constructor(readonly inner: Codec<T, Input>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | null> {
+    return input === null ? ok(null) : this.inner._parse(input, path);
+  }
+
+  encode(value: T | null): Input | null {
+    return value === null ? null : this.inner.encode(value);
   }
 }
 
@@ -1015,9 +1034,13 @@ class UnionSchema<Out> extends Schema<Out> {
 /**
  * A non-discriminated union — `union([a, b])` accepts a value that any member
  * validates, in order. The output type is the union of the members' types.
- * For unions keyed by a literal discriminant, prefer {@link discriminatedUnion}
- * (faster, better errors); for exhaustive coverage of a declared union, see
- * {@link unionFor}.
+ *
+ * First match wins, so ORDER matters when members overlap: since `object(...)`
+ * ignores extra keys, a broader value can match a narrower object member first
+ * (and lose the extra fields). On no match it reports a single `invalid_union`
+ * issue (member errors are not aggregated). For unions keyed by a literal
+ * discriminant, prefer {@link discriminatedUnion} (faster, precise errors); for
+ * exhaustive coverage of a declared union, see {@link unionFor}.
  */
 export function union<M extends ReadonlyArray<Schema<unknown>>>(
   members: M,

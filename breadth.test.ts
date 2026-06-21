@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { date, nullable, number, object, string, union } from "./totalis";
+import { codec, date, nullable, number, object, objectCodec, string, union } from "./totalis";
 
 describe("date", () => {
   it("accepts a valid Date", () => {
@@ -41,6 +41,14 @@ describe("nullable", () => {
   it("works via the standalone helper too", () => {
     expect(nullable(number()).parse(null)).toBe(null);
     expect(nullable(number()).parse(5)).toBe(5);
+  });
+
+  it("the .nullable() method preserves codec encodability (usable in objectCodec)", () => {
+    const isoDate = codec(string(), { decode: (s) => new Date(s), encode: (d) => d.toISOString() });
+    const rec = objectCodec({ at: isoDate.nullable() });
+    expect(rec.parse({ at: null })).toEqual({ at: null });
+    expect(rec.encode({ at: null })).toEqual({ at: null });
+    expect(rec.encode({ at: new Date(0) })).toEqual({ at: "1970-01-01T00:00:00.000Z" });
   });
 });
 
