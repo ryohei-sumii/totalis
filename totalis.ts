@@ -948,12 +948,24 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
 // ---------------------------------------------------------------------------
 // Completeness API
 //
-// Promise 1: a schema cannot drift from the type it claims to validate. The
-// expected shape for `T` is "a schema decoding to each field of `T`", so a
-// missing field, an extra field, or a too-loose/wrong field all produce a
-// precise, NATIVE TypeScript error pointing at the offending key — no opaque
-// `& "Schema does not match T"` marker.
+// Promise 1: a schema cannot drift from the type it claims to validate. Our
+// differentiator vs Zod's `schema satisfies z.ZodType<T>` is EXACTNESS: that
+// check is one-directional assignability (schema output must be ASSIGNABLE to
+// `T`), so it silently accepts a schema that is NARROWER than `T` — a
+// `literal("admin")` for a `string` field, a branded value for a plain field,
+// or a required schema for an optional key. `schemaFor<T>()` instead demands a
+// per-field EXACT match (`Equals<Infer, T[K]>`) and names the drifting field.
 // ---------------------------------------------------------------------------
+
+/** Strict, non-distributive type equality. */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Readable per-field diagnostics surfaced in the completeness error. */
+type FieldMismatch<K extends PropertyKey> =
+  `✗ field '${K & string}' must validate EXACTLY the declared type (too loose, too narrow, branded, or optional-mismatch)`;
+type ExtraField<K extends PropertyKey> =
+  `✗ '${K & string}' is not a field of the declared type`;
 
 /**
  * The shape a schema for `T` must have: for every key of `T` (optional keys
@@ -961,8 +973,11 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
  * means the per-field schema may be a {@link codec} whose input representation
  * differs from `T[K]`.
  *
- * Use it `satisfies`-style to check a shape while KEEPING its precise (possibly
- * more-branded) field types:
+ * This is the ASSIGNABILITY-based (Zod-parity) variant — like
+ * `satisfies z.ZodType<T>`, it accepts a schema whose output is assignable to
+ * `T` (so a more-precise/branded field is allowed). Use it `satisfies`-style
+ * to check a shape while KEEPING its precise field types. For the stricter,
+ * drift-proof EXACT check, use {@link schemaFor}.
  *
  * @example
  *   const shape = {
@@ -970,28 +985,40 @@ export function match<K extends PropertyKey, T extends Record<K, string | number
  *     name: string(),
  *   } satisfies SchemaFor<User>;
  *   const user = object(shape);
- *
- * A plain `string()` where `T` expects `Branded<string, "Email">` fails to
- * compile — the error names `Schema<Branded<string, "Email">, ...>`, guiding
- * you to `.brand<"Email">()` instead of leaving you to guess.
  */
 export type SchemaFor<T> = { [K in keyof T]-?: Schema<T[K], unknown> };
 
 /**
- * The completeness primitive: build an object schema GUARANTEED to match `T`.
- * A missing field, an extra field, or a wrong/too-loose field fails to compile
- * (pointing at the exact key), and the resulting schema's `Infer` is exactly
- * `T`. For the `satisfies` style — which preserves more precise field types —
- * use {@link SchemaFor} directly.
+ * The EXACT expected shape for `T`: each provided field schema is accepted
+ * as-is only when its output type is EXACTLY `T[K]`; otherwise it is replaced
+ * by a readable {@link FieldMismatch} message, and any extra key by
+ * {@link ExtraField}. Self-referential over the inferred `S` so the error
+ * lands on the exact offending field.
+ */
+type ExactSchemaFor<T, S extends SchemaFor<T>> = {
+  [K in keyof T]-?: Equals<Infer<S[K]>, T[K]> extends true ? S[K] : FieldMismatch<K>;
+} & {
+  [K in Exclude<keyof S, keyof T>]: ExtraField<K>;
+};
+
+/**
+ * The completeness primitive: build an object schema whose inferred type is
+ * EXACTLY `T` — not merely assignable to it. A missing, extra, wrong,
+ * too-loose, too-narrow (e.g. an unintended brand or literal), or
+ * optional-mismatched field fails to compile with a message naming the field.
+ * The resulting schema's `Infer` is exactly `T`.
+ *
+ * Unlike `satisfies z.ZodType<T>` (and {@link SchemaFor}), this rejects a
+ * schema that is merely a subtype of `T`, so your domain type and your
+ * validator can never silently disagree.
  *
  * @example
  *   interface User { name: string; age: number }
  *   const user = schemaFor<User>()({ name: string(), age: number() });
  */
 export function schemaFor<T>() {
-  // The casts are internal only: `SchemaFor<T>` already guarantees the shape
-  // decodes to `T`, so the produced ObjectSchema decodes to exactly `T` (this
-  // is asserted at the type level in `completeness.test-d.ts`).
-  return (shape: SchemaFor<T>): Schema<T> =>
+  // The cast is justified by the per-field `Equals` check in ExactSchemaFor:
+  // every field's output is exactly `T[K]`, so the ObjectSchema decodes to `T`.
+  return <S extends SchemaFor<T>>(shape: S & ExactSchemaFor<T, S>): Schema<T> =>
     new ObjectSchema(shape as unknown as Shape) as unknown as Schema<T>;
 }
