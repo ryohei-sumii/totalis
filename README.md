@@ -83,10 +83,32 @@ const User = schemaFor<User>()({
 ```
 
 Add a field to `User` and **every** schema claiming to validate it fails to
-compile until updated. (Zod can approximate this with
-`schema satisfies z.ZodType<User>`, but the errors are opaque and it is not the
-default workflow — in totalis it is the headline feature, with errors that name
-the exact missing/wrong field.)
+compile until updated.
+
+`schemaFor<T>()` goes further than Zod's closest tool, `schema satisfies
+z.ZodType<T>`. That check is one-directional **assignability** — the schema's
+output need only be *assignable to* `T` — so it silently accepts a schema that
+is **narrower** than `T`. `schemaFor<T>()` demands a per-field **exact** match,
+catching drift Zod misses:
+
+```ts
+interface Profile { role: string; age?: number }
+
+// Zod-style assignability ACCEPTS all of these (they're subtypes of Profile):
+const loose = {
+  role: literal("admin"),    // 🙈 narrower than string — schema rejects valid roles
+  age: number(),             // 🙈 required where Profile.age is optional
+} satisfies SchemaFor<Profile>; // ✅ compiles (this is what `satisfies z.ZodType` does)
+
+// totalis EXACT rejects each, naming the field:
+schemaFor<Profile>()({
+  role: literal("admin"), // ❌ field 'role' must validate EXACTLY the declared type
+  age: number(),          // ❌ field 'age' must validate EXACTLY (it's optional)
+});
+```
+
+So your domain type and your validator can never *silently* disagree — not even
+by being too strict.
 
 **vs Zod — validation is recorded in the type, so you can't forget it.** A
 branded output means an unvalidated value is a *compile* error, not a runtime
@@ -463,9 +485,31 @@ const User = schemaFor<User>()({
 ```
 
 `User` にフィールドを足せば、それを検証すると謳う**すべての**スキーマが、更新するまで
-コンパイルを通らなくなります。（Zod も `schema satisfies z.ZodType<User>` で近いことは
-できますが、エラーが不透明で既定のワークフローでもありません。totalis ではこれが看板機能で、
-不足/誤りのフィールドを名指しします。）
+コンパイルを通らなくなります。
+
+`schemaFor<T>()` は、Zod の最も近い手段 `schema satisfies z.ZodType<T>` より**踏み込みます**。
+その検査は一方向の**代入可能性**（スキーマ出力が `T` に代入可能ならよい）なので、`T` より
+**狭い**スキーマを黙って受け入れます。`schemaFor<T>()` はフィールド単位の**厳密一致**を要求し、
+Zod が見逃すドリフトを捕まえます:
+
+```ts
+interface Profile { role: string; age?: number }
+
+// Zod 流の代入可能性は以下を全部「通す」（どれも Profile の部分型だから）:
+const loose = {
+  role: literal("admin"),    // 🙈 string より狭い — 有効な role を弾くスキーマ
+  age: number(),             // 🙈 Profile.age は任意なのに必須
+} satisfies SchemaFor<Profile>; // ✅ 通る（これが `satisfies z.ZodType` の挙動）
+
+// totalis の EXACT は各々を、フィールドを名指しして拒否:
+schemaFor<Profile>()({
+  role: literal("admin"), // ❌ field 'role' must validate EXACTLY the declared type
+  age: number(),          // ❌ field 'age' must validate EXACTLY（任意キー）
+});
+```
+
+これで、ドメイン型とバリデータが**黙って食い違う**ことは——「厳しすぎる」方向であっても——
+起きなくなります。
 
 **Zod との比較 — 検証したことが型に刻まれるので、検証し忘れられない。** ブランド付き
 出力は、未検証の値を**コンパイル**エラーにします（実行時の不意打ちではなく）:

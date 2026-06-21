@@ -30,6 +30,15 @@ exhaustiveness.** The name is the promise: a *total* function is defined for
 every input in its domain, with no partiality and no "this can't happen"
 branches.
 
+**The one thing Zod v4 cannot do (our wedge):** Zod's reverse check,
+`schema satisfies z.ZodType<T>`, is one-directional *assignability* — it accepts
+any schema whose output is assignable to `T`, so a schema NARROWER than `T`
+(an unintended `literal`/brand, a required field where `T` is optional) passes
+silently. `schemaFor<T>()` enforces a per-field **EXACT** match
+(`Equals<Infer, T[K]>`) and names the drifting field. Lean into guarantees that
+assignability-based checks structurally cannot express; do not try to win on
+breadth/perf/ecosystem.
+
 ### The thesis — one sentence
 
 > **You write the runtime check exactly once, at the boundary; in exchange the
@@ -106,9 +115,12 @@ spec at https://standardschema.dev before implementing.
   (machine-readable `IssueCode` + `params`, English `message` as fallback);
   `ValidationError.format()` / `.flatten()` render a tree / `{ formErrors,
   fieldErrors }`, and both take an optional `Localizer`.
-- `schemaFor<T>()` / `SchemaFor<T>` are the completeness primitives (native
-  per-field errors; `SchemaFor<T>` also works `satisfies`-style) — extend their
-  spirit everywhere.
+- Completeness primitives: `schemaFor<T>()` is EXACT (per-field
+  `Equals<Infer, T[K]>` via a self-referential `ExactSchemaFor<T, S>`; readable
+  `FieldMismatch`/`ExtraField` messages; rejects too-narrow/brand/optional-drift
+  — the Zod-`satisfies`-can't-do-this wedge). `SchemaFor<T>` is the looser,
+  assignability-based variant for the `satisfies` style (precision-preserving).
+  Extend the EXACT spirit everywhere.
 - **Standard Schema v1**: every schema implements `~standard`
   (`StandardSchemaV1<Input, Output>`, `validate` = the decode direction); the
   spec interface is vendored to keep the core dependency-free.
@@ -136,15 +148,14 @@ spec at https://standardschema.dev before implementing.
    standalone alternative to Effect Schema. Object-level encode is done too:
    `objectCodec(...)` round-trips an object whose fields are all codecs (encode
    is type-gated, so `transform` fields fail to compile).
-3. ~~**First-class completeness API**: ergonomic `schemaFor<T>()`, plus a
-   `satisfies`-style helper and good error messages.~~ ✅ Done. The expected
-   shape is `SchemaFor<T> = { [K in keyof T]-?: Schema<T[K], unknown> }`, so
-   missing / extra / wrong / too-loose fields all produce NATIVE per-field
-   errors (no opaque `& "Schema does not match T"`). `SchemaFor<T>` doubles as
-   the `satisfies`-style helper (preserves precise field types and allows codec
-   fields). Brand ergonomics resolved: a plain `string()` where `T` wants
-   `Branded<string, "Email">` errors with the branded type named, guiding you
-   to `.brand<"Email">()`. (`completeness.test.ts` + `completeness.test-d.ts`.)
+3. ~~**First-class completeness API**~~ ✅ Done, then sharpened into the Zod
+   wedge: `schemaFor<T>()` is now EXACT (per-field `Equals<Infer, T[K]>`), so it
+   rejects too-narrow / unintended-brand / optional-mismatch fields that
+   `satisfies z.ZodType<T>` (assignability) accepts silently, with readable
+   `FieldMismatch`/`ExtraField` messages. `SchemaFor<T>` remains the
+   assignability-based `satisfies`-style helper (precision-preserving, allows
+   codec fields). `completeness.test-d.ts` includes a side-by-side proving the
+   same too-narrow shape PASSES assignability but FAILS the exact check.
 5. ~~Type-level test suite (e.g. `expectTypeOf` / `tsd` / `vitest` type
    tests).~~ ✅ Done. `*.test-d.ts` are vitest type tests (`expectTypeOf` /
    `assertType` + `@ts-expect-error` negatives) run via `typecheck` (Vitest

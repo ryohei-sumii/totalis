@@ -11,6 +11,7 @@ import { describe, expectTypeOf, test } from "vitest";
 
 import {
   codec,
+  literal,
   number,
   schemaFor,
   string,
@@ -104,5 +105,54 @@ describe("SchemaFor used satisfies-style preserves precise field types", () => {
   test("satisfies still catches a missing field", () => {
     // @ts-expect-error — missing `email`.
     const _missing = {} satisfies SchemaFor<Contact>;
+  });
+});
+
+// The differentiator vs Zod: `schemaFor<T>()` is EXACT, not assignability.
+// `satisfies z.ZodType<T>` (modeled here by the assignability-based `SchemaFor<T>`)
+// silently accepts a schema NARROWER than `T`; `schemaFor<T>()` rejects it.
+describe("schemaFor is EXACT — catches drift that Zod's assignability misses", () => {
+  interface Profile {
+    role: string;
+    age?: number;
+  }
+
+  test("a too-narrow field (literal where T wants string) is rejected", () => {
+    schemaFor<Profile>()({
+      // @ts-expect-error — literal("admin") is narrower than string; not exact.
+      role: literal("admin"),
+      age: number().optional(),
+    });
+  });
+
+  test("an unintended brand where T is plain is rejected", () => {
+    schemaFor<Profile>()({
+      // @ts-expect-error — Branded<string,"R"> is not exactly string.
+      role: string().brand<"R">(),
+      age: number().optional(),
+    });
+  });
+
+  test("a required schema for an optional key is rejected", () => {
+    schemaFor<Profile>()({
+      role: string(),
+      // @ts-expect-error — number() is not exactly `number | undefined`.
+      age: number(),
+    });
+  });
+
+  test("the SAME too-narrow shape PASSES Zod-style assignability (the gap closed)", () => {
+    // Assignability-based, exactly what `satisfies z.ZodType<Profile>` does:
+    // a narrower `role` is ACCEPTED — this is precisely what totalis catches.
+    const zodParity = {
+      role: literal("admin"),
+      age: number().optional(),
+    } satisfies SchemaFor<Profile>;
+    expectTypeOf<Infer<typeof zodParity.role>>().toEqualTypeOf<"admin">();
+  });
+
+  test("an exact schema compiles and Infer is exactly Profile", () => {
+    const p = schemaFor<Profile>()({ role: string(), age: number().optional() });
+    expectTypeOf<Infer<typeof p>>().toEqualTypeOf<Profile>();
   });
 });
