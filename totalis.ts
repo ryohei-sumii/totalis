@@ -324,13 +324,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Deep-merge two successfully-parsed values for an {@link IntersectionSchema}.
- * Each side's object schema strips keys it doesn't declare, so a plain object
- * is rebuilt key-by-key from BOTH sides (recursing where a key is shared and
- * both values are objects). Non-objects come from validating the same input on
- * both sides, so they are already equal — the right value is returned. Uses
- * {@link setKey} + own-key checks so a `"__proto__"` data key can't pollute.
+ * Each side's object/array schema strips fields it doesn't declare, so the
+ * result is rebuilt from BOTH sides: objects key-by-key and arrays
+ * element-by-element (recursing where a key/index is shared), since both sides
+ * validated the same input and so agree on array length. Other scalars come
+ * from validating the same input on both sides, so they are already equal — the
+ * right value is returned. Uses {@link setKey} + own-key checks so a
+ * `"__proto__"` data key can't pollute.
  */
 function mergeIntersection(a: unknown, b: unknown): unknown {
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    return a.map((item, i) => mergeIntersection(item, b[i]));
+  }
   if (!isPlainObject(a) || !isPlainObject(b)) return b;
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(a)) setKey(out, key, a[key]);

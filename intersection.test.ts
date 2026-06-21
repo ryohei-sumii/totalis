@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { date, intersection, number, object, string } from "./totalis";
+import { array, date, intersection, number, object, string } from "./totalis";
 
 describe("intersection (A & B)", () => {
   const Entity = object({ id: string() });
@@ -37,6 +37,16 @@ describe("intersection (A & B)", () => {
     const r = intersection(A, B).safeParse({ meta: { a: "x", b: 1 } });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data).toEqual({ meta: { a: "x", b: 1 } });
+  });
+
+  it("deep-merges array elements (each side strips its own fields)", () => {
+    const A = object({ items: array(object({ a: string() })) });
+    const B = object({ items: array(object({ b: number() })) });
+    const r = intersection(A, B).safeParse({ items: [{ a: "x", b: 1 }, { a: "y", b: 2 }] });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data).toEqual({ items: [{ a: "x", b: 1 }, { a: "y", b: 2 }] });
+    }
   });
 
   it("combines primitive refinements (output stays the primitive)", () => {
