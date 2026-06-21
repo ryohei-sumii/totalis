@@ -552,7 +552,12 @@ class StringSchema extends Codec<string> {
 
   regex(regex: RegExp, message = "Invalid format"): StringSchema {
     return this.and({
-      run: (s) => regex.test(s),
+      run: (s) => {
+        // Reset lastIndex so a /g or /y flagged regex (which advances it on
+        // each `test`) doesn't give alternating results across parses.
+        regex.lastIndex = 0;
+        return regex.test(s);
+      },
       code: "invalid_string",
       params: { validation: "regex" },
       message,

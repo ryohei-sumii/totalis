@@ -29,6 +29,15 @@ describe("string refinements", () => {
     expect(string().regex(/^a+$/).safeParse("aab").success).toBe(false);
   });
 
+  it("regex is stateless across parses even with a /g flag", () => {
+    // A /g (or /y) regex advances lastIndex on each `test`; the schema must
+    // reset it so the same input yields the same result every time.
+    const schema = string().regex(/a/g);
+    expect(schema.safeParse("a").success).toBe(true);
+    expect(schema.safeParse("a").success).toBe(true);
+    expect(schema.safeParse("a").success).toBe(true);
+  });
+
   it("reports a structured code for a format failure", () => {
     const result = string().email().safeParse("nope");
     if (result.success) throw new Error("expected failure");
