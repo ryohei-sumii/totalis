@@ -43,9 +43,11 @@ breadth/perf/ecosystem.
 the domain type is authored ELSEWHERE (OpenAPI/GraphQL/Prisma codegen, a shared
 type package, a hand-maintained API contract) and the boundary validator must
 *provably* match it. That is exactly where Zod's infer-from-schema model is
-weakest. The living proof is `contract.test-d.ts`: regenerate the type (add a
-field / enum member / union variant) and the schema fails to compile until
-fixed. Keep that demo green and front-and-center.
+weakest. The living proof is `contract.test-d.ts`: regenerate the type and the
+schema fails to compile until fixed — for *any* drift, and crucially for the
+narrowing/coverage drift (too-narrow field, missing enum member / union
+variant) that stays assignable to the type and so slips past
+`satisfies z.ZodType<T>`. Keep that demo green and front-and-center.
 
 ### The thesis — one sentence
 
