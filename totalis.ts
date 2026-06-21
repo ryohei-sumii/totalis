@@ -265,7 +265,9 @@ function defaultMessage(code: IssueCode, params: Readonly<Record<string, unknown
     case "too_small":
       return `Expected at least ${String(params.minimum)} item(s)`;
     case "invalid_union":
-      return `Expected discriminant ${String(params.options)}, received ${JSON.stringify(params.received)}`;
+      return "options" in params
+        ? `Expected discriminant ${String(params.options)}, received ${JSON.stringify(params.received)}`
+        : "Input did not match any union member";
     case "custom":
       return typeof params.message === "string" ? params.message : "Invalid input";
   }
@@ -332,6 +334,11 @@ export abstract class Schema<Output, Input = Output> implements StandardSchemaV1
   /** Make this schema also accept `undefined`, producing an optional object key. */
   optional(): Schema<Output | undefined, Input | undefined> {
     return new OptionalSchema<Output, Input>(this);
+  }
+
+  /** Make this schema also accept `null`, producing `T | null` (a {@link Codec} stays encodable). */
+  nullable(): Schema<Output | null, Input | null> {
+    return new NullableSchema<Output, Input>(this);
   }
 
   /**
@@ -426,6 +433,11 @@ export abstract class Codec<Output, Input = Output> extends Schema<Output, Input
   override optional(): Codec<Output | undefined, Input | undefined> {
     return new OptionalCodec<Output, Input>(this);
   }
+
+  /** Accept `null` while staying encodable. */
+  override nullable(): Codec<Output | null, Input | null> {
+    return new NullableCodec<Output, Input>(this);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +452,19 @@ class StringSchema extends Codec<string> {
   }
 
   encode(value: string): string {
+    return value;
+  }
+}
+
+class DateSchema extends Codec<Date> {
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Date> {
+    // A `Date` carrying `NaN` (e.g. `new Date("nope")`) is not a valid value.
+    return input instanceof Date && !Number.isNaN(input.getTime())
+      ? ok(input)
+      : fail(path, "invalid_type", { expected: "Date", received: typeName(input) });
+  }
+
+  encode(value: Date): Date {
     return value;
   }
 }
@@ -523,6 +548,16 @@ class OptionalSchema<T, Input = T> extends Schema<T | undefined, Input | undefin
   }
 }
 
+class NullableSchema<T, Input = T> extends Schema<T | null, Input | null> {
+  constructor(readonly inner: Schema<T, Input>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | null> {
+    return input === null ? ok(null) : this.inner._parse(input, path);
+  }
+}
+
 class BrandSchema<T, B extends string, Input> extends Schema<Branded<T, B>, Input> {
   constructor(readonly inner: Schema<T, Input>) {
     super();
@@ -562,6 +597,20 @@ class OptionalCodec<T, Input> extends Codec<T | undefined, Input | undefined> {
 
   encode(value: T | undefined): Input | undefined {
     return value === undefined ? undefined : this.inner.encode(value);
+  }
+}
+
+class NullableCodec<T, Input> extends Codec<T | null, Input | null> {
+  constructor(readonly inner: Codec<T, Input>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T | null> {
+    return input === null ? ok(null) : this.inner._parse(input, path);
+  }
+
+  encode(value: T | null): Input | null {
+    return value === null ? null : this.inner.encode(value);
   }
 }
 
@@ -784,12 +833,22 @@ export function boolean(): BooleanSchema {
   return new BooleanSchema();
 }
 
+/** Validate a `Date` instance (rejecting an invalid `Date` whose time is `NaN`). */
+export function date(): DateSchema {
+  return new DateSchema();
+}
+
 export function literal<const L extends Literal>(value: L): LiteralSchema<L> {
   return new LiteralSchema(value);
 }
 
 export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
   return new OptionalSchema(schema);
+}
+
+/** Make `schema` also accept `null`, producing `T | null`. */
+export function nullable<T, Input>(schema: Schema<T, Input>): Schema<T | null, Input | null> {
+  return new NullableSchema<T, Input>(schema);
 }
 
 export function array<T>(element: Schema<T>): ArraySchema<T> {
@@ -955,6 +1014,38 @@ export function discriminatedUnion<K extends string, V extends ReadonlyArray<Var
     key,
     variants as ReadonlyArray<ObjectSchema<Shape>>,
   );
+}
+
+/** A non-discriminated union: accepts the first member that parses. */
+class UnionSchema<Out> extends Schema<Out> {
+  constructor(readonly members: ReadonlyArray<Schema<unknown>>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<Out> {
+    for (const member of this.members) {
+      const result = member._parse(input, path);
+      if (result.ok) return result as Internal<Out>;
+    }
+    return fail(path, "invalid_union", { members: this.members.length });
+  }
+}
+
+/**
+ * A non-discriminated union — `union([a, b])` accepts a value that any member
+ * validates, in order. The output type is the union of the members' types.
+ *
+ * First match wins, so ORDER matters when members overlap: since `object(...)`
+ * ignores extra keys, a broader value can match a narrower object member first
+ * (and lose the extra fields). On no match it reports a single `invalid_union`
+ * issue (member errors are not aggregated). For unions keyed by a literal
+ * discriminant, prefer {@link discriminatedUnion} (faster, precise errors); for
+ * exhaustive coverage of a declared union, see {@link unionFor}.
+ */
+export function union<M extends ReadonlyArray<Schema<unknown>>>(
+  members: M,
+): Schema<Infer<M[number]>> {
+  return new UnionSchema<Infer<M[number]>>(members as ReadonlyArray<Schema<unknown>>);
 }
 
 /** Accepts exactly the literal values it was built with (a closed enum). */
