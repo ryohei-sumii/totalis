@@ -982,9 +982,9 @@ export class ObjectSchema<S extends Shape> extends Schema<InferShape<S>> {
    * dropped.
    */
   pick<K extends keyof S>(keys: readonly K[]): ObjectSchema<Pick<S, K>> {
-    const out: Partial<S> = {};
-    for (const key of keys) out[key] = this.shape[key];
-    return new ObjectSchema(out as Pick<S, K>);
+    const out: Shape = {};
+    for (const key of keys) setKey(out, key as string, this.shape[key]);
+    return new ObjectSchema(out as unknown as Pick<S, K>);
   }
 
   /** Drop the named fields — the dual of {@link pick}; `Infer` equals `Omit<Infer<this>, K>`. */

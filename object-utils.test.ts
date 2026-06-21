@@ -73,6 +73,16 @@ describe("object().merge", () => {
   });
 });
 
+describe("__proto__ field keys are handled as data, not prototype mutation", () => {
+  it("pick of a '__proto__' field keeps it as an own field", () => {
+    const Weird = object({ ["__proto__"]: string(), id: string() });
+    const picked = Weird.pick(["__proto__"]);
+    const r = picked.safeParse({ ["__proto__"]: "x" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(Object.prototype.hasOwnProperty.call(r.data, "__proto__")).toBe(true);
+  });
+});
+
 describe("derived schemas do not mutate the source", () => {
   it("pick/omit/extend leave the original intact", () => {
     User.pick(["id"]);
