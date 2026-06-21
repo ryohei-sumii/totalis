@@ -684,6 +684,28 @@ class BooleanSchema extends Codec<boolean> {
   }
 }
 
+/**
+ * Coerce raw input with `coerceFn`, then validate with `base`. DECODE-ONLY (a
+ * plain {@link Schema}, never a {@link Codec}): coercion widens the accepted
+ * input and is not invertible — exactly like `transform` — so a coerced field
+ * cannot enter {@link objectCodec}. The static input type is honestly
+ * `unknown`, not the output type, so `InferInput` never lies about what the
+ * boundary accepts.
+ */
+class CoerceSchema<O> extends Schema<O, unknown> {
+  constructor(
+    private readonly coerceFn: (input: unknown) => unknown,
+    private readonly base: Schema<O, unknown>,
+  ) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<O> {
+    return this.base._parse(this.coerceFn(input), path);
+  }
+}
+
+
 /** Literal primitive values that can be matched exactly. */
 type Literal = string | number | boolean | null;
 
@@ -1179,6 +1201,40 @@ export function object<S extends Shape>(shape: S): ObjectSchema<S> {
 export function objectCodec<S extends EncodableShape>(shape: S): ObjectCodec<S> {
   return new ObjectCodec(shape);
 }
+
+/**
+ * Coerce input before validating — `coerce.number()` turns `"42"` into `42`.
+ * Decode-only (the result is a {@link Schema}, not a {@link Codec}, and its
+ * `InferInput` is honestly `unknown`). Pass a refined base to keep narrowing —
+ * `coerce.number(number().min(0))`, `coerce.number(int())` — since any schema
+ * with the right output is accepted, the output type (and any brand) is
+ * preserved.
+ *
+ * Coercion uses the JS built-ins (`Number` / `String` / `Boolean` / `Date`),
+ * so their quirks apply (e.g. `Number(null) === 0`, `Boolean("false") === true`);
+ * an un-coercible value (`Number("abc")` is `NaN`, `new Date("nope")`) is
+ * rejected by the base.
+ */
+export const coerce = {
+  string<O extends string>(
+    base: Schema<O, unknown> = string() as unknown as Schema<O, unknown>,
+  ): Schema<O, unknown> {
+    return new CoerceSchema((x) => String(x), base);
+  },
+  number<O extends number>(
+    base: Schema<O, unknown> = number() as unknown as Schema<O, unknown>,
+  ): Schema<O, unknown> {
+    return new CoerceSchema((x) => Number(x), base);
+  },
+  boolean<O extends boolean>(
+    base: Schema<O, unknown> = boolean() as unknown as Schema<O, unknown>,
+  ): Schema<O, unknown> {
+    return new CoerceSchema((x) => Boolean(x), base);
+  },
+  date(base: Schema<Date, unknown> = date()): Schema<Date, unknown> {
+    return new CoerceSchema((x) => (x instanceof Date ? x : new Date(x as string | number)), base);
+  },
+};
 
 /** An integer — `number` branded so a plain `number` can't stand in for it. */
 export type Integer = Branded<number, "int">;

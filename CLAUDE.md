@@ -132,8 +132,14 @@ spec at https://standardschema.dev before implementing.
   boundary schema cannot drift from the derived type): `.pick(keys)` →
   `Pick<…>`, `.omit(keys)` → `Omit<…>`, `.partial()` → `Partial<…>` (wraps each
   field in `optional`), `.extend(shape)` (new fields override on collision) and
-  `.merge(other)` → `ExtendShape<…>`. Roadmap next: `coerce`, then `lazy`
-  (recursive) / `intersection`.
+  `.merge(other)` → `ExtendShape<…>`. **Coercion**: `coerce.string/number/
+  boolean/date(base?)` pre-applies the JS built-in (`Number`/`String`/`Boolean`/
+  `Date`) then validates with `base` (default = the matching primitive; pass a
+  refined/branded base like `coerce.number(int())` to keep narrowing). It is
+  DECODE-ONLY — `CoerceSchema` is a plain `Schema` (not a `Codec`, like
+  `transform`), so a coerced field can't enter `objectCodec`, and its `_input`
+  is honestly `unknown` (coercion widens the accepted input, so `InferInput`
+  doesn't lie). Roadmap next: `lazy` (recursive) / `intersection`.
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
