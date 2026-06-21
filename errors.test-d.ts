@@ -25,7 +25,7 @@ describe("Issue is machine-readable and i18n-ready", () => {
 
   test("IssueCode is a closed union", () => {
     expectTypeOf<IssueCode>().toEqualTypeOf<
-      "invalid_type" | "invalid_literal" | "too_small" | "invalid_union" | "custom"
+      "invalid_type" | "invalid_literal" | "invalid_value" | "too_small" | "invalid_union" | "custom"
     >();
   });
 

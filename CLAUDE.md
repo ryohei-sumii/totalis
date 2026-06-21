@@ -127,6 +127,11 @@ spec at https://standardschema.dev before implementing.
 - **Totality primitives**: `brand<B>()` / `refine()` on the base, plus `int()`
   and `array(...).nonempty()` for precise output types; `discriminatedUnion`,
   `match` (compile-enforced exhaustive handling) and `assertNever`.
+- **Exhaustive completeness for unions/enums** (the exact wedge, extended):
+  `enumFor<T>()(values)` covers a literal union EXACTLY and `unionFor<T>()(key,
+  variants)` covers a declared discriminated union EXACTLY — a missing member /
+  variant fails to compile (named). Zod infers unions from the schema, so it
+  cannot enforce coverage of an independently-declared union/enum.
 - **Encodability is in the type**: `Codec<Output, Input>` (abstract) is "a
   schema that can also `encode`". Primitives are identity codecs; `codec(...)`
   and `objectCodec(...)` build real ones; `.brand()` / `.optional()` on a codec

@@ -118,6 +118,7 @@ export const VENDOR = "totalis";
 export type IssueCode =
   | "invalid_type"
   | "invalid_literal"
+  | "invalid_value"
   | "too_small"
   | "invalid_union"
   | "custom";
@@ -259,6 +260,8 @@ function defaultMessage(code: IssueCode, params: Readonly<Record<string, unknown
       return `Expected ${String(params.expected)}, received ${String(params.received)}`;
     case "invalid_literal":
       return `Expected ${JSON.stringify(params.expected)}, received ${JSON.stringify(params.received)}`;
+    case "invalid_value":
+      return `Expected one of ${String(params.options)}, received ${JSON.stringify(params.received)}`;
     case "too_small":
       return `Expected at least ${String(params.minimum)} item(s)`;
     case "invalid_union":
@@ -907,6 +910,80 @@ export function discriminatedUnion<K extends string, V extends ReadonlyArray<Var
     key,
     variants as ReadonlyArray<ObjectSchema<Shape>>,
   );
+}
+
+/** Accepts exactly the literal values it was built with (a closed enum). */
+class LiteralUnionSchema<T extends Literal> extends Codec<T> {
+  private readonly allowed: ReadonlySet<Literal>;
+
+  constructor(readonly values: readonly T[]) {
+    super();
+    this.allowed = new Set(values);
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<T> {
+    if (this.allowed.has(input as Literal)) return ok(input as T);
+    const options = this.values.map((value) => JSON.stringify(value)).join(" | ");
+    return fail(path, "invalid_value", { options, received: input });
+  }
+
+  encode(value: T): T {
+    return value;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Exhaustive completeness for unions/enums (the Zod wedge, extended)
+//
+// Like `schemaFor<T>` for objects: you declare the domain union/enum `T`
+// independently, and the schema must cover it EXACTLY. Add a member to `T` and
+// the schema fails to compile until it is covered. Zod infers unions FROM the
+// schema (schema -> type), so it cannot enforce coverage of a declared union.
+// ---------------------------------------------------------------------------
+
+type EnumMissing<M extends Literal> = `✗ enum is missing declared member: ${M}`;
+type UnionMissing<M> = { readonly "✗ union is missing declared variant(s)": M };
+type UnionExtra<M> = { readonly "✗ union has a variant not in the declared type": M };
+
+/**
+ * Build a closed-enum schema that covers the literal union `T` EXACTLY. A
+ * missing member fails to compile (naming it); a value not in `T` fails too.
+ * `Infer` is exactly `T`.
+ *
+ * @example
+ *   type Role = "admin" | "user" | "guest";
+ *   const Role = enumFor<Role>()(["admin", "user", "guest"]);
+ */
+export function enumFor<T extends Literal>() {
+  return <const L extends readonly T[]>(
+    values: L & ([Exclude<T, L[number]>] extends [never] ? unknown : EnumMissing<Exclude<T, L[number]>>),
+  ): Schema<T> => new LiteralUnionSchema<T>(values as readonly T[]) as unknown as Schema<T>;
+}
+
+/**
+ * Build a discriminated-union schema that covers the declared union `T`
+ * EXACTLY. A missing variant (or a variant whose type is not in `T`) fails to
+ * compile; `Infer` is exactly `T`. Runtime dispatch + duplicate-discriminant
+ * checks come from {@link discriminatedUnion}.
+ *
+ * @example
+ *   type Shape = { kind: "circle"; r: number } | { kind: "square"; s: number };
+ *   const Shape = unionFor<Shape>()("kind", [
+ *     object({ kind: literal("circle"), r: number() }),
+ *     object({ kind: literal("square"), s: number() }),
+ *   ]);
+ */
+export function unionFor<T>() {
+  return <K extends string, V extends ReadonlyArray<Variant<K>>>(
+    key: K,
+    variants: V &
+      ([Exclude<T, Infer<V[number]>>] extends [never]
+        ? [Exclude<Infer<V[number]>, T>] extends [never]
+          ? unknown
+          : UnionExtra<Exclude<Infer<V[number]>, T>>
+        : UnionMissing<Exclude<T, Infer<V[number]>>>),
+  ): Schema<T> =>
+    new DiscriminatedUnionSchema<T>(key, variants as unknown as ReadonlyArray<ObjectSchema<Shape>>);
 }
 
 // ---------------------------------------------------------------------------
