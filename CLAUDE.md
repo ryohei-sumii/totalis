@@ -149,8 +149,16 @@ spec at https://standardschema.dev before implementing.
   `LazySchema._parse` detects a cyclic input (an input that is its own ancestor,
   via a stack-disciplined `WeakSet`) and returns a normal failure instead of
   overflowing the stack, so `safeParse` keeps its no-throw contract (a
-  non-cyclic shared reference / DAG still validates). Roadmap next:
-  `intersection`.
+  non-cyclic shared reference / DAG still validates). **Intersection**:
+  `intersection(a, b)` validates against BOTH and deep-merges the results
+  (`A & B`); since each object schema strips its own undeclared keys, the
+  output is rebuilt key-by-key from both sides (recursing on shared
+  object-valued keys, via `setKey` so a `"__proto__"` data key can't pollute),
+  and issues from both sides are reported together. Decode-only (a plain
+  `Schema`, not a `Codec` — encoding an intersection is ambiguous); for two
+  object schemas you own, `.merge()` / `.extend()` is usually clearer. The full
+  breadth roadmap (union/nullable/date, record/tuple, refinements, object utils,
+  coerce, lazy, intersection) is now implemented.
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
