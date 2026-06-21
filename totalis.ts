@@ -847,6 +847,41 @@ export function codec<Input, Output>(
   return new MappedCodec(base, transform.decode, transform.encode);
 }
 
+/** Surfaced when the base schema doesn't decode EXACTLY to the declared `Encoded` type. */
+type EncodedMismatch<Encoded> = {
+  readonly "✗ base must decode EXACTLY to the declared Encoded type": Encoded;
+};
+
+/**
+ * Build a {@link Codec} that pins BOTH ends of a serialization boundary to
+ * independently-declared contract types: it decodes to exactly `Decoded` and
+ * encodes to exactly `Encoded`. The `base` schema's inferred type must EXACTLY
+ * equal `Encoded` (not merely be assignable to it), so a drift in the wire
+ * contract — or a too-narrow base — fails to compile. `decode` / `encode` are
+ * type-checked in both directions against the two declared types.
+ *
+ * This exact, bidirectional check is the wedge Zod's `z.codec` cannot express:
+ * Zod infers the input type from the base schema, so it cannot verify the base
+ * against an independently-authored `Encoded` contract.
+ *
+ * @example
+ *   interface WireUser { createdAt: string }   // from the API contract
+ *   interface User { createdAt: Date }          // your domain model
+ *   const User = codecFor<User, WireUser>()(
+ *     schemaFor<WireUser>()({ createdAt: string() }),
+ *     {
+ *       decode: (w) => ({ createdAt: new Date(w.createdAt) }),
+ *       encode: (u) => ({ createdAt: u.createdAt.toISOString() }),
+ *     },
+ *   );
+ */
+export function codecFor<Decoded, Encoded>() {
+  return <B extends Schema<Encoded, unknown>>(
+    base: B & (Equals<Infer<B>, Encoded> extends true ? unknown : EncodedMismatch<Encoded>),
+    transform: { decode: (input: Encoded) => Decoded; encode: (output: Decoded) => Encoded },
+  ): Codec<Decoded, Encoded> => codec(base as Schema<Encoded>, transform);
+}
+
 // ---------------------------------------------------------------------------
 // Exhaustive discriminated unions
 //

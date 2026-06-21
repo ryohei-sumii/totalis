@@ -142,6 +142,12 @@ spec at https://standardschema.dev before implementing.
   variants)` covers a declared discriminated union EXACTLY — a missing member /
   variant fails to compile (named). Zod infers unions from the schema, so it
   cannot enforce coverage of an independently-declared union/enum.
+- **Bidirectional completeness for codecs** (the exact wedge, both directions):
+  `codecFor<Decoded, Encoded>()(base, { decode, encode })` pins both ends of a
+  serialization boundary to independently-declared contracts — the base must
+  decode EXACTLY to `Encoded` (`Equals`, not assignability), and `decode`/
+  `encode` are typed against `Decoded`/`Encoded`. Zod's `z.codec` infers the
+  input from the base, so it cannot check it against an authored `Encoded` type.
 - **Encodability is in the type**: `Codec<Output, Input>` (abstract) is "a
   schema that can also `encode`". Primitives are identity codecs; `codec(...)`
   and `objectCodec(...)` build real ones; `.brand()` / `.optional()` on a codec
