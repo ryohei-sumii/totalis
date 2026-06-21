@@ -291,6 +291,25 @@ const area = (s: Shape): number =>
 // the same guarantee.
 ```
 
+When the union/enum type is declared **independently** (codegen, a shared
+package), `enumFor<T>()` / `unionFor<T>()` enforce that the schema covers it
+**exactly** — a missing member fails to compile. Zod infers unions *from* the
+schema, so it cannot check coverage of a type you authored elsewhere:
+
+```ts
+import { enumFor, unionFor, object, literal, number } from "totalis";
+
+type Role = "admin" | "user" | "guest";
+const Role = enumFor<Role>()(["admin", "user", "guest"]);
+//                            ^ drop "guest" → ❌ enum is missing declared member: guest
+
+type Shape = { kind: "circle"; r: number } | { kind: "square"; s: number };
+const Shape = unionFor<Shape>()("kind", [
+  object({ kind: literal("circle"), r: number() }),
+  object({ kind: literal("square"), s: number() }),
+]); // drop a variant → ❌ union is missing declared variant(s)
+```
+
 #### Transform, default, and bidirectional codecs
 
 `Schema<Output, Input>` tracks two types: the decoded `Output` and the `Input`
@@ -690,6 +709,25 @@ const area = (s: Shape): number =>
 // "triangle" バリアントを追加すると、対応するまで全ての `match` 呼び出しが
 // コンパイルエラーになる。手書きの `switch` では default 分岐で `assertNever(x)`
 // を使えば同じ保証が得られる。
+```
+
+ユニオン/列挙の型を**外部で宣言**している場合（コード生成・共有パッケージ）、
+`enumFor<T>()` / `unionFor<T>()` がスキーマの**過不足ない網羅**を強制します。メンバーが
+欠けるとコンパイルエラー。Zod はユニオンをスキーマ*から* infer するので、別の場所で
+authored した型のカバレッジは検査できません:
+
+```ts
+import { enumFor, unionFor, object, literal, number } from "totalis";
+
+type Role = "admin" | "user" | "guest";
+const Role = enumFor<Role>()(["admin", "user", "guest"]);
+//                            ^ "guest" を削ると → ❌ enum is missing declared member: guest
+
+type Shape = { kind: "circle"; r: number } | { kind: "square"; s: number };
+const Shape = unionFor<Shape>()("kind", [
+  object({ kind: literal("circle"), r: number() }),
+  object({ kind: literal("square"), s: number() }),
+]); // バリアントを削ると → ❌ union is missing declared variant(s)
 ```
 
 #### transform・default・双方向 codec
