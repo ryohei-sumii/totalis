@@ -251,6 +251,25 @@ coerce.date();                   // "2026-01-01" -> Date
 // objectCodec({ n: coerce.number() }); // ✗ compile error
 ```
 
+Recursive types use `lazy`. TypeScript can't infer recursion, so you annotate
+the output — and that annotation forces the schema to match the type:
+
+```ts
+interface Category {
+  name: string;
+  subcategories: Category[];
+}
+
+const Category: Schema<Category> = lazy(() =>
+  object({ name: string(), subcategories: array(Category) }),
+);
+
+// Drift is still caught: drop a field and it won't compile.
+// const Bad: Schema<Category> = lazy(() => object({ name: string() })); // ✗
+// For EXACT per-field checking, wrap schemaFor inside lazy:
+// lazy(() => schemaFor<Category>()({ name: string(), subcategories: array(Category) }))
+```
+
 #### Parse values
 
 ```ts
@@ -754,6 +773,25 @@ coerce.date();                   // "2026-01-01" -> Date
 
 // transform と同様、強制変換は非可逆なので objectCodec には入れられません:
 // objectCodec({ n: coerce.number() }); // ✗ コンパイルエラー
+```
+
+再帰型は `lazy` を使います。TypeScript は再帰を推論できないので出力型を注釈
+しますが、その注釈がスキーマを型に一致させる強制力になります:
+
+```ts
+interface Category {
+  name: string;
+  subcategories: Category[];
+}
+
+const Category: Schema<Category> = lazy(() =>
+  object({ name: string(), subcategories: array(Category) }),
+);
+
+// ドリフトは依然として検出される: フィールドを落とすとコンパイルが通らない。
+// const Bad: Schema<Category> = lazy(() => object({ name: string() })); // ✗
+// EXACT な per-field チェックが欲しければ lazy の中で schemaFor を使う:
+// lazy(() => schemaFor<Category>()({ name: string(), subcategories: array(Category) }))
 ```
 
 #### 値をパースする

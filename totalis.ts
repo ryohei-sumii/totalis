@@ -714,6 +714,28 @@ class CoerceSchema<O> extends Schema<O, unknown> {
   }
 }
 
+/**
+ * A schema resolved lazily, so it can reference itself — the building block for
+ * RECURSIVE types (trees, linked lists, comment threads). TypeScript cannot
+ * infer a recursive type, so the output is annotated (`lazy<Category>(...)` or
+ * `const Category: Schema<Category> = lazy(...)`); the getter must then return a
+ * `Schema<Category>`, so the schema still cannot drift from the type — and
+ * wrapping `schemaFor<Category>()({...})` inside keeps the EXACT per-field
+ * guarantee. The getter is memoized, so the recursive schema is built once.
+ */
+class LazySchema<O, I> extends Schema<O, I> {
+  private cached: Schema<O, I> | undefined;
+
+  constructor(private readonly getter: () => Schema<O, I>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<O> {
+    this.cached ??= this.getter();
+    return this.cached._parse(input, path);
+  }
+}
+
 /** Literal primitive values that can be matched exactly. */
 type Literal = string | number | boolean | null;
 
@@ -1174,6 +1196,19 @@ export function nullable<T, Input>(schema: Schema<T, Input>): Schema<T | null, I
 
 export function array<T>(element: Schema<T>): ArraySchema<T> {
   return new ArraySchema(element);
+}
+
+/**
+ * Define a schema lazily so it can reference itself — for RECURSIVE types.
+ * Annotate the output, since TS can't infer recursion:
+ *
+ * @example
+ *   interface Category { name: string; children: Category[] }
+ *   const Category: Schema<Category> = lazy(() =>
+ *     object({ name: string(), children: array(Category) }));
+ */
+export function lazy<O, I = O>(getter: () => Schema<O, I>): Schema<O, I> {
+  return new LazySchema(getter);
 }
 
 /** A dictionary `Record<string, V>` — arbitrary string keys, each value validated by `value`. */
