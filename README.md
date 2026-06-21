@@ -10,6 +10,15 @@
 
 ## English
 
+> **Reach for totalis when the type is the contract** — your domain type is
+> authored elsewhere (OpenAPI / GraphQL / Prisma codegen, a shared type package,
+> an API contract) and your boundary validator must *provably* match it.
+> Regenerate the type and the validator fails to compile until it matches again.
+> totalis breaks on *any* drift — including the narrowing/coverage drift (a
+> too-narrow field, a missing enum member or union variant) that stays
+> assignable to the type and so slips past Zod's `satisfies z.ZodType<T>`. See
+> the living demo in [`contract.test-d.ts`](./contract.test-d.ts).
+
 ### Concept
 
 Like Zod, **the schema is the single source of truth** — both the runtime
@@ -431,6 +440,14 @@ Every feature ships with **both** a runtime test and a type-level test.
 ---
 
 ## 日本語
+
+> **「型が契約」のときに totalis を使う** — ドメイン型が別の場所で authored され
+> （OpenAPI / GraphQL / Prisma のコード生成、共有型パッケージ、API 契約）、境界の
+> バリデータがそれに*証明可能に*一致しなければならない場面。型を再生成すると、
+> 一致するまでバリデータがコンパイルを通らなくなる。totalis は*あらゆる*ドリフトで
+> 壊れます — 型に代入可能なまま Zod の `satisfies z.ZodType<T>` をすり抜ける
+> 「狭すぎるフィールド・enum/ユニオンの取りこぼし」も含めて。生きたデモは
+> [`contract.test-d.ts`](./contract.test-d.ts)。
 
 ### コンセプト
 
