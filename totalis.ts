@@ -853,16 +853,22 @@ type EncodedMismatch<Encoded> = {
 };
 
 /**
- * Build a {@link Codec} that pins BOTH ends of a serialization boundary to
- * independently-declared contract types: it decodes to exactly `Decoded` and
- * encodes to exactly `Encoded`. The `base` schema's inferred type must EXACTLY
- * equal `Encoded` (not merely be assignable to it), so a drift in the wire
- * contract — or a too-narrow base — fails to compile. `decode` / `encode` are
- * type-checked in both directions against the two declared types.
+ * Build a {@link Codec} that pins both ends of a serialization boundary to
+ * independently-declared contract types: `Decoded` (your domain model) and
+ * `Encoded` (the wire format). The `base` schema must validate the wire format
+ * EXACTLY as `Encoded` — its inferred type must *equal* `Encoded` (`Equals`,
+ * not mere assignability) — so a too-narrow base, or a drift in the wire
+ * contract, fails to compile. `decode` / `encode` are then type-checked in both
+ * directions against `Encoded` and `Decoded`.
  *
- * This exact, bidirectional check is the wedge Zod's `z.codec` cannot express:
- * Zod infers the input type from the base schema, so it cannot verify the base
- * against an independently-authored `Encoded` contract.
+ * (The exact, drift-proof check is on the `Encoded`/wire side — the side with a
+ * schema to verify. The `Decoded` side is the declared output type of `decode`,
+ * type-safe but not separately verified, since `decode` is an arbitrary
+ * function.)
+ *
+ * This is the wedge Zod's `z.codec` cannot express: Zod infers the input type
+ * from the base schema, so it cannot verify the base against an independently-
+ * authored `Encoded` contract.
  *
  * @example
  *   interface WireUser { createdAt: string }   // from the API contract
@@ -876,7 +882,11 @@ type EncodedMismatch<Encoded> = {
  *   );
  */
 export function codecFor<Decoded, Encoded>() {
-  return <B extends Schema<Encoded, unknown>>(
+  // base is constrained to Schema<Encoded, Encoded> (a plain validator of the
+  // wire format) — NOT Schema<Encoded, unknown> — so a transforming codec base
+  // (whose INPUT differs from Encoded) is rejected; otherwise the produced
+  // codec's InferInput would lie about what `parse` actually accepts.
+  return <B extends Schema<Encoded, Encoded>>(
     base: B & (Equals<Infer<B>, Encoded> extends true ? unknown : EncodedMismatch<Encoded>),
     transform: { decode: (input: Encoded) => Decoded; encode: (output: Decoded) => Encoded },
   ): Codec<Decoded, Encoded> => codec(base as Schema<Encoded>, transform);

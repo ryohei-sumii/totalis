@@ -5,7 +5,7 @@
  */
 import { describe, expectTypeOf, test } from "vitest";
 
-import { codecFor, enumFor, object, string, type Infer, type InferInput } from "./totalis";
+import { codec, codecFor, enumFor, object, string, type Infer, type InferInput } from "./totalis";
 
 interface WireUser {
   createdAt: string;
@@ -32,6 +32,16 @@ describe("a base that doesn't decode EXACTLY to Encoded fails to compile", () =>
       // @ts-expect-error — base decodes to "a", not exactly `string` (Encoded drift).
       enumFor<"a">()(["a"]),
       { decode: (s) => s.length, encode: (n) => String(n) },
+    );
+  });
+
+  test("a transforming codec base is rejected (its input ≠ Encoded; would make InferInput lie)", () => {
+    // inner: Codec<number, string> — parses a STRING, decodes to number.
+    const inner = codec(string(), { decode: (s) => Number(s), encode: (n: number) => String(n) });
+    codecFor<boolean, number>()(
+      // @ts-expect-error — base's input is string, not number; rejected so InferInput can't lie.
+      inner,
+      { decode: (n) => n > 0, encode: (b) => (b ? 1 : 0) },
     );
   });
 });
