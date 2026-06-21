@@ -11,8 +11,12 @@ idea is the standard one: **the schema is the source of truth, and both the
 runtime validator AND the static type are derived from the same object**
 (`Infer<typeof schema>`).
 
-The working prototype lives in `totalis.ts`. Treat it as the seed, not the
-final API.
+The implementation lives in `src/*` (layered, acyclic modules: `standard-schema`,
+`errors`, `util`, `schema`, `primitives`, `collections`, `unions`,
+`completeness`). `totalis.ts` is a thin **barrel** that re-exports the public
+API — it's the single public entry, and every test imports from `"./totalis"`.
+`pnpm build` (tsup) bundles the barrel into `dist/` (ESM + CJS + `.d.ts`); the
+package ships `dist/` only.
 
 ## The differentiation — READ THIS FIRST
 
@@ -102,7 +106,7 @@ interface (`~standard` property) from day one.** Without it we are dead on
 arrival regardless of how good the completeness story is. Verify the current
 spec at https://standardschema.dev before implementing.
 
-## Current architecture (in totalis.ts)
+## Current architecture (in `src/*`, exposed via the `totalis.ts` barrel)
 
 - `Schema<Output, Input = Output>` abstract base, with phantom
   `declare readonly _output` / `_input` fields. `Infer<S> = S["_output"]` and
@@ -248,6 +252,9 @@ pnpm install           # deps (pnpm only — `npm`/`yarn` are blocked by preinst
 pnpm run typecheck     # tsc --noEmit — typecheck the whole project (authoritative gate)
 pnpm test              # runtime + type-level tests (Vitest, typecheck enabled)
 pnpm run test:types    # only the *.test-d.ts type tests
+pnpm run build         # tsup → dist/ (ESM + CJS + .d.ts) from the totalis.ts barrel
+pnpm run check:publish # publint — lint the publishable package
+pnpm run check:exports # @arethetypeswrong/cli — verify exports resolve in every mode
 ```
 
 ## House rules for Claude Code
