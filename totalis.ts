@@ -714,6 +714,51 @@ class CoerceSchema<O> extends Schema<O, unknown> {
   }
 }
 
+/**
+ * A schema resolved lazily, so it can reference itself — the building block for
+ * RECURSIVE types (trees, linked lists, comment threads). TypeScript cannot
+ * infer a recursive type, so the output is annotated (`lazy<Category>(...)` or
+ * `const Category: Schema<Category> = lazy(...)`); the getter must then return a
+ * `Schema<Category>`, so the schema still cannot drift from the type — and
+ * wrapping `schemaFor<Category>()({...})` inside keeps the EXACT per-field
+ * guarantee. The getter is memoized, so the recursive schema is built once.
+ *
+ * Because `lazy` lets the INPUT drive recursion depth, a cyclic input would
+ * otherwise recurse forever; `_parse` detects a cycle (an input that is its own
+ * ancestor) and returns a normal failure, so `safeParse` keeps its no-throw
+ * contract. A non-cyclic shared reference (a DAG) is fine — the guard is
+ * stack-disciplined (cleared on the way back up), so it only flags ancestors.
+ */
+class LazySchema<O, I> extends Schema<O, I> {
+  private cached: Schema<O, I> | undefined;
+  /** Object inputs currently on this schema's parse stack (ancestors). */
+  private readonly inProgress = new WeakSet<object>();
+
+  constructor(private readonly getter: () => Schema<O, I>) {
+    super();
+  }
+
+  _parse(input: unknown, path: ReadonlyArray<PropertyKey>): Internal<O> {
+    this.cached ??= this.getter();
+    // Only objects can form a cycle; primitives parse directly.
+    if (typeof input !== "object" || input === null) {
+      return this.cached._parse(input, path);
+    }
+    if (this.inProgress.has(input)) {
+      return fail(path, "invalid_type", {
+        expected: "a finite (non-circular) value",
+        received: "circular reference",
+      });
+    }
+    this.inProgress.add(input);
+    try {
+      return this.cached._parse(input, path);
+    } finally {
+      this.inProgress.delete(input);
+    }
+  }
+}
+
 /** Literal primitive values that can be matched exactly. */
 type Literal = string | number | boolean | null;
 
@@ -1174,6 +1219,19 @@ export function nullable<T, Input>(schema: Schema<T, Input>): Schema<T | null, I
 
 export function array<T>(element: Schema<T>): ArraySchema<T> {
   return new ArraySchema(element);
+}
+
+/**
+ * Define a schema lazily so it can reference itself — for RECURSIVE types.
+ * Annotate the output, since TS can't infer recursion:
+ *
+ * @example
+ *   interface Category { name: string; children: Category[] }
+ *   const Category: Schema<Category> = lazy(() =>
+ *     object({ name: string(), children: array(Category) }));
+ */
+export function lazy<O, I = O>(getter: () => Schema<O, I>): Schema<O, I> {
+  return new LazySchema(getter);
 }
 
 /** A dictionary `Record<string, V>` — arbitrary string keys, each value validated by `value`. */

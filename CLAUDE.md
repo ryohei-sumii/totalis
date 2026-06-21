@@ -139,7 +139,18 @@ spec at https://standardschema.dev before implementing.
   DECODE-ONLY — `CoerceSchema` is a plain `Schema` (not a `Codec`, like
   `transform`), so a coerced field can't enter `objectCodec`, and its `_input`
   is honestly `unknown` (coercion widens the accepted input, so `InferInput`
-  doesn't lie). Roadmap next: `lazy` (recursive) / `intersection`.
+  doesn't lie). **Recursion**: `lazy(() => schema)` resolves a self-referencing
+  schema (the getter is memoized, so the recursive schema is built once). TS
+  can't infer recursion, so the output is annotated
+  (`const Category: Schema<Category> = lazy(...)`); the getter must then return
+  `Schema<Category>`, so the schema can't drift from the type — and wrapping
+  `schemaFor<Category>()({...})` inside `lazy` keeps the EXACT per-field
+  guarantee. Cycle-safe: since `lazy` lets the input drive recursion depth,
+  `LazySchema._parse` detects a cyclic input (an input that is its own ancestor,
+  via a stack-disciplined `WeakSet`) and returns a normal failure instead of
+  overflowing the stack, so `safeParse` keeps its no-throw contract (a
+  non-cyclic shared reference / DAG still validates). Roadmap next:
+  `intersection`.
 - `ObjectSchema` uses mapped types. Key detail: keys whose schema admits
   `undefined` become OPTIONAL keys (`age?: number`), not `age: number | undefined`.
 - `_parse(input, path)` threads a path for nested error reporting; `safeParse`
