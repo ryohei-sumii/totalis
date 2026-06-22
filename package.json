@@ -30,7 +30,7 @@
     "dist"
   ],
   "scripts": {
-    "preinstall": "npx only-allow pnpm",
+    "preinstall": "node -e \"if(process.env.INIT_CWD===process.cwd()){require('child_process').execSync('npx only-allow pnpm',{stdio:'inherit'})}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:types": "vitest run --typecheck.only",
