@@ -1,0 +1,14 @@
+{
+  "name": "zod-vs-totalis-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reproducible head-to-head: Zod's `satisfies z.ZodType<T>` silently accepts narrower-than-T schemas; totalis rejects them.",
+  "scripts": {
+    "verify": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}
